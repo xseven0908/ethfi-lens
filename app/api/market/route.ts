@@ -1,33 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const fallback = {
-  usd: { price:0.4046, marketCap:393_800_000, fdv:404_600_000, volume24h:69_400_000, high24h:0.423, low24h:0.397, ath:8.53 },
-  cny: { price:2.90, marketCap:2_822_000_000, fdv:2_900_000_000, volume24h:497_000_000, high24h:3.03, low24h:2.84, ath:61.1 },
-};
-const fallbackChart = (price:number)=>Array.from({length:90},(_,i)=>[Date.now()-(89-i)*86_400_000,price*(1.14-i*0.00155+Math.sin(i/5)*0.045)]);
+const MAX_SUPPLY = 1_000_000_000;
+const VERIFIED_CIRCULATING_SUPPLY = 973_468_000;
+
+type Venue = { name:string; price:number; change24h:number; volume24h:number; high24h:number; low24h:number };
+const median=(values:number[])=>{const sorted=[...values].sort((a,b)=>a-b),middle=Math.floor(sorted.length/2);return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2};
+async function json(url:string,timeout=6500){const response=await fetch(url,{cache:"no-store",headers:{accept:"application/json"},signal:AbortSignal.timeout(timeout)});if(!response.ok)throw new Error(`${response.status} ${url}`);return response.json()}
+
+async function readBinance():Promise<{venue:Venue;chart:Array<[number,number]>}>{
+  const [ticker,klines]=await Promise.all([json("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHFIUSDT"),json("https://api.binance.com/api/v3/klines?symbol=ETHFIUSDT&interval=1d&limit=90")]);
+  return {venue:{name:"Binance",price:Number(ticker.lastPrice),change24h:Number(ticker.priceChangePercent),volume24h:Number(ticker.quoteVolume),high24h:Number(ticker.highPrice),low24h:Number(ticker.lowPrice)},chart:klines.map((x:unknown[])=>[Number(x[0]),Number(x[4])])};
+}
+async function readOkx():Promise<Venue>{
+  const payload=await json("https://www.okx.com/api/v5/market/ticker?instId=ETHFI-USDT"),ticker=payload.data?.[0];if(!ticker)throw new Error("OKX empty response");
+  const price=Number(ticker.last),open=Number(ticker.open24h);return {name:"OKX",price,change24h:open?((price/open)-1)*100:0,volume24h:Number(ticker.volCcy24h),high24h:Number(ticker.high24h),low24h:Number(ticker.low24h)};
+}
+async function readBybit():Promise<Venue>{
+  const payload=await json("https://api.bybit.com/v5/market/tickers?category=spot&symbol=ETHFIUSDT"),ticker=payload.result?.list?.[0];if(!ticker)throw new Error("Bybit empty response");
+  return {name:"Bybit",price:Number(ticker.lastPrice),change24h:Number(ticker.price24hPcnt)*100,volume24h:Number(ticker.turnover24h),high24h:Number(ticker.highPrice24h),low24h:Number(ticker.lowPrice24h)};
+}
+async function readCoinGecko(){
+  const headers:Record<string,string>={accept:"application/json"};if(process.env.COINGECKO_API_KEY)headers["x-cg-demo-api-key"]=process.env.COINGECKO_API_KEY;
+  const response=await fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=ether-fi&price_change_percentage=24h",{cache:"no-store",headers,signal:AbortSignal.timeout(5500)});if(!response.ok)throw new Error("CoinGecko unavailable");return (await response.json())?.[0]??null;
+}
+async function readCnyRate(){try{const payload=await json("https://api.coinbase.com/v2/exchange-rates?currency=USD",4500),rate=Number(payload.data?.rates?.CNY);if(Number.isFinite(rate)&&rate>0)return {rate,source:"Coinbase FX",stale:false}}catch{}return {rate:7.17,source:"汇率备用值",stale:true}}
 
 export async function GET(request:NextRequest){
-  const currency=request.nextUrl.searchParams.get("currency")==="cny"?"cny":"usd",snapshot=fallback[currency];
-  try{
-    const headers:Record<string,string>={accept:"application/json"},apiKey=process.env.COINGECKO_API_KEY;if(apiKey)headers["x-cg-demo-api-key"]=apiKey;
-    const [marketResponse,chartResponse]=await Promise.all([
-      fetch(`https://api.coingecko.com/api/v3/coins/markets?vs_currency=${currency}&ids=ether-fi&price_change_percentage=24h`,{headers,cache:"no-store",signal:AbortSignal.timeout(7000)}),
-      fetch(`https://api.coingecko.com/api/v3/coins/ether-fi/market_chart?vs_currency=${currency}&days=90`,{headers,cache:"no-store",signal:AbortSignal.timeout(7000)}),
-    ]);
-    if(!marketResponse.ok||!chartResponse.ok)throw new Error("CoinGecko unavailable");
-    const market=(await marketResponse.json())[0],chart=await chartResponse.json();if(!market||!Array.isArray(chart.prices))throw new Error("Invalid response");
-    return NextResponse.json({price:market.current_price,change24h:market.price_change_percentage_24h??0,marketCap:market.market_cap,fdv:market.fully_diluted_valuation??market.current_price*1_000_000_000,volume24h:market.total_volume,circulatingSupply:market.circulating_supply??973_468_000,totalSupply:market.total_supply??1_000_000_000,high24h:market.high_24h,low24h:market.low_24h,ath:market.ath,athDate:market.ath_date,chart:chart.prices,source:"CoinGecko 实时行情",stale:false,updatedAt:market.last_updated??new Date().toISOString()},{headers:{"Cache-Control":"public, max-age=30, s-maxage=30, stale-while-revalidate=300"}});
-  }catch{
-    try{
-      const [tickerResponse,klinesResponse]=await Promise.all([
-        fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHFIUSDT",{cache:"no-store",signal:AbortSignal.timeout(7000)}),
-        fetch("https://api.binance.com/api/v3/klines?symbol=ETHFIUSDT&interval=1d&limit=90",{cache:"no-store",signal:AbortSignal.timeout(7000)}),
-      ]);
-      if(!tickerResponse.ok||!klinesResponse.ok)throw new Error("Binance unavailable");
-      const ticker=await tickerResponse.json(),klines=await klinesResponse.json(),rate=currency==="cny"?7.17:1,price=Number(ticker.lastPrice)*rate,circulatingSupply=973_468_000;
-      return NextResponse.json({price,change24h:Number(ticker.priceChangePercent),marketCap:price*circulatingSupply,fdv:price*1_000_000_000,volume24h:Number(ticker.quoteVolume)*rate,circulatingSupply,totalSupply:1_000_000_000,high24h:Number(ticker.highPrice)*rate,low24h:Number(ticker.lowPrice)*rate,ath:snapshot.ath,athDate:"2024-03-27T00:00:00.000Z",chart:klines.map((item:unknown[])=>[Number(item[0]),Number(item[4])*rate]),source:"Binance ETHFI/USDT 备选行情",stale:false,updatedAt:new Date().toISOString()},{headers:{"Cache-Control":"public, max-age=30, s-maxage=30, stale-while-revalidate=300"}});
-    }catch{
-      return NextResponse.json({...snapshot,change24h:-1.1,circulatingSupply:973_468_000,totalSupply:1_000_000_000,athDate:"2024-03-27T00:00:00.000Z",chart:fallbackChart(snapshot.price),source:"最近一次可用快照",stale:true,updatedAt:new Date().toISOString()},{headers:{"Cache-Control":"no-store"}});
-    }
-  }
+  const currency=request.nextUrl.searchParams.get("currency")==="cny"?"cny":"usd";
+  const [binanceResult,okxResult,bybitResult,coinGeckoResult,fx]=await Promise.allSettled([readBinance(),readOkx(),readBybit(),readCoinGecko(),readCnyRate()]);
+  const venues:Venue[]=[];let chart:Array<[number,number]>=[];
+  if(binanceResult.status==="fulfilled"){venues.push(binanceResult.value.venue);chart=binanceResult.value.chart}if(okxResult.status==="fulfilled")venues.push(okxResult.value);if(bybitResult.status==="fulfilled")venues.push(bybitResult.value);
+  const cg=coinGeckoResult.status==="fulfilled"?coinGeckoResult.value:null;
+  if(!venues.length&&cg)venues.push({name:"CoinGecko",price:Number(cg.current_price),change24h:Number(cg.price_change_percentage_24h??0),volume24h:Number(cg.total_volume??0),high24h:Number(cg.high_24h??cg.current_price),low24h:Number(cg.low_24h??cg.current_price)});
+  if(!venues.length)return NextResponse.json({error:"实时行情源暂时不可用",stale:true,updatedAt:new Date().toISOString()},{status:503,headers:{"Cache-Control":"no-store"}});
+  const fxValue=fx.status==="fulfilled"?fx.value:{rate:7.17,source:"汇率备用值",stale:true},rate=currency==="cny"?fxValue.rate:1;
+  const priceUsd=median(venues.map(x=>x.price)),change24h=median(venues.map(x=>x.change24h)),circulatingSupply=Number(cg?.circulating_supply)||VERIFIED_CIRCULATING_SUPPLY,totalSupply=Number(cg?.total_supply)||MAX_SUPPLY,volumeUsd=venues.reduce((sum,x)=>sum+x.volume24h,0);
+  return NextResponse.json({price:priceUsd*rate,change24h,marketCap:priceUsd*circulatingSupply*rate,fdv:priceUsd*MAX_SUPPLY*rate,volume24h:volumeUsd*rate,circulatingSupply,totalSupply,high24h:Math.max(...venues.map(x=>x.high24h))*rate,low24h:Math.min(...venues.map(x=>x.low24h))*rate,ath:(Number(cg?.ath)||8.53)*rate,athDate:cg?.ath_date||"2024-03-27T00:00:00.000Z",chart:chart.map(([timestamp,value])=>[timestamp,value*rate]),venues:venues.map(x=>({...x,price:x.price*rate,volume24h:x.volume24h*rate,high24h:x.high24h*rate,low24h:x.low24h*rate})),volumeScope:`${venues.map(x=>x.name).join(" + ")} 现货合计`,circulatingSource:cg?"CoinGecko 市场口径":"Tokenomics.com（2026-08-24 校验）",fxSource:currency==="cny"?fxValue.source:"USD",source:`${venues.map(x=>x.name).join(" · ")} 实时聚合`,stale:currency==="cny"&&fxValue.stale,updatedAt:new Date().toISOString()},{headers:{"Cache-Control":"public, max-age=10, s-maxage=10, stale-while-revalidate=30"}});
 }
