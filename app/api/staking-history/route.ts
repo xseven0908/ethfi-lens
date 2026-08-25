@@ -19,12 +19,21 @@ type SupplyEvent={timestamp:number;change:number};
 type RateEvent={timestamp:number;rate:number};
 
 async function json(url:string,timeout=10_000){
-  const response=await fetch(url,{cache:"no-store",signal:AbortSignal.timeout(timeout)});
-  if(!response.ok)throw new Error(`Explorer ${response.status}`);
-  const payload=await response.json();
-  if(String(payload.status)==="0"&&/no (records|logs) found/i.test(`${payload.message||""} ${payload.result||""}`))payload.result=[];
-  if(String(payload.status)!=="1"&&!Array.isArray(payload.result))throw new Error(payload.message||"Explorer unavailable");
-  return payload;
+  let lastError:unknown;
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const response=await fetch(url,{cache:"no-store",signal:AbortSignal.timeout(timeout)});
+      if(!response.ok)throw new Error(`Explorer ${response.status}`);
+      const payload=await response.json();
+      if(String(payload.status)==="0"&&/no (records|logs) found/i.test(`${payload.message||""} ${payload.result||""}`))payload.result=[];
+      if(String(payload.status)!=="1"&&!Array.isArray(payload.result))throw new Error(payload.message||"Explorer unavailable");
+      return payload;
+    }catch(error){
+      lastError=error;
+      if(attempt<2)await new Promise(resolve=>setTimeout(resolve,250*(attempt+1)));
+    }
+  }
+  throw lastError;
 }
 
 async function rpc(rpcUrl:string,method:string,params:unknown[]){
@@ -87,7 +96,7 @@ export async function GET(){
     }
     const currentShares=networkHistory.reduce((sum,x)=>sum+x.currentShares,0),currentRate=rates.at(-1)!.rate;
     points.push([now*1000,currentShares,currentShares*currentRate]);
-    return NextResponse.json({points,rangeDays:90,chains:networkHistory.map(x=>x.name),source:"Blockscout 链上 Transfer · Accountant ExchangeRateUpdated",method:"四链 sETHFI 铸造/销毁净额 × 当日兑换率",updatedAt:new Date().toISOString()},{headers:{"Cache-Control":"public, max-age=300, s-maxage=900, stale-while-revalidate=1800"}});
+    return NextResponse.json({points,rangeDays:90,chains:networkHistory.map(x=>x.name),source:"Blockscout 链上 Transfer · Accountant ExchangeRateUpdated",method:"四链 sETHFI 铸造/销毁净额 × 当日兑换率",rateUpdatedAt:new Date(rates.at(-1)!.timestamp*1000).toISOString(),updatedAt:new Date().toISOString()},{headers:{"Cache-Control":"public, max-age=300, s-maxage=900, stale-while-revalidate=1800"}});
   }catch(error){
     console.error("staking history unavailable",error);
     return NextResponse.json({error:"历史质押数据暂时不可用"},{status:503,headers:{"Cache-Control":"no-store"}});
