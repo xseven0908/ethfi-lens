@@ -16,7 +16,7 @@ const networks=[
 ] as const;
 
 const exitNetworks=[
-  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:99_999,indexed:false,rpcFallback:"https://eth.blockscout.com/api/eth-rpc"},
+  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:99_999,indexed:false,rpcFallback:"https://mainnet.gateway.tenderly.co"},
   {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false,rpcFallback:null},
   {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true,rpcFallback:"https://base.gateway.tenderly.co"},
 ] as const;
