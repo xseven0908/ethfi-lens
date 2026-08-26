@@ -9,16 +9,16 @@ const MAINNET_ATOMIC_QUEUE="0xD45884B592E316eB816199615A95C182F75dea07";
 const L2_ATOMIC_QUEUE="0xB149EF0f2539f1D9E1C9fd98d86E9C13A2aeC17A";
 
 const networks=[
-  {name:"Ethereum",rpcs:["https://ethereum-rpc.publicnode.com","https://eth.llamarpc.com","https://rpc.flashbots.net"],ethfi:"0xfe0c30065b384f05761f15d0cc899d4f9f9cc0eb"},
-  {name:"Optimism",rpcs:["https://optimism-rpc.publicnode.com","https://mainnet.optimism.io"],ethfi:"0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"},
-  {name:"Arbitrum",rpcs:["https://arbitrum-one-rpc.publicnode.com","https://arb1.arbitrum.io/rpc"],ethfi:"0x7189fb5b6504bbff6a852b13b7b82a3c118fdc27"},
-  {name:"Base",rpcs:["https://base-rpc.publicnode.com","https://mainnet.base.org"],ethfi:"0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2"},
+  {name:"Ethereum",rpcs:["https://ethereum-rpc.publicnode.com","https://eth.drpc.org","https://eth.blockscout.com/api/eth-rpc","https://eth.llamarpc.com","https://rpc.flashbots.net"],ethfi:"0xfe0c30065b384f05761f15d0cc899d4f9f9cc0eb"},
+  {name:"Optimism",rpcs:["https://optimism-rpc.publicnode.com","https://optimism.drpc.org","https://mainnet.optimism.io"],ethfi:"0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"},
+  {name:"Arbitrum",rpcs:["https://arbitrum-one-rpc.publicnode.com","https://arbitrum.drpc.org","https://arbitrum.blockscout.com/api/eth-rpc","https://arb1.arbitrum.io/rpc"],ethfi:"0x7189fb5b6504bbff6a852b13b7b82a3c118fdc27"},
+  {name:"Base",rpcs:["https://base-rpc.publicnode.com","https://base.drpc.org","https://mainnet.base.org"],ethfi:"0x6c240dda6b5c336df09a4d011139beaaa1ea2aa2"},
 ] as const;
 
 const exitNetworks=[
-  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:120_000},
-  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000},
-  {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000},
+  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:120_000,indexed:false},
+  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false},
+  {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true},
 ] as const;
 
 type ChainReading={name:(typeof networks)[number]["name"];shares:number;rate:number;staked:number;tokenSupply:number;blockNumber:number;ok:true};
@@ -63,6 +63,7 @@ async function fetchAtomicLogs(network:(typeof exitNetworks)[number],topic:strin
     module:"logs",action:"getLogs",fromBlock:String(Math.max(0,fromBlock)),toBlock:"latest",
     address:network.queue,topic0:topic,page:"1",offset:"1000",
   });
+  if(network.indexed){params.set("topic2",`0x${SETHFI.toLowerCase().replace(/^0x/,"").padStart(64,"0")}`);params.set("topic0_2_opr","and")}
   const response=await fetch(`${network.explorer}/api?${params}`,{cache:"no-store",signal:AbortSignal.timeout(20_000)});
   if(!response.ok)throw new Error(`${network.name} explorer unavailable`);
   const payload=await response.json() as {message?:string;result?:ExplorerLog[]|string};
