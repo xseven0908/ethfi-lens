@@ -36,7 +36,7 @@ npm run build
 - 市场价格采用多个中心化交易所有效报价的中位数。
 - sETHFI 总份额来自各链代币合约的 `totalSupply`。
 - 对应质押资产通过 sETHFI 份额与链上 Accountant 兑换率计算。
-- 退出队列来自官方 DelayedWithdraw 合约的 `outstandingShares` 与待赎回资产。
+- 退出队列来自官网当前使用的 AtomicQueue：按 `AtomicRequestUpdated` 与 `AtomicRequestFulfilled` 事件还原 Ethereum、Arbitrum、Base 的未完成请求，并剔除已取消或已过期状态。
 - 代币归属解锁与 sETHFI 退出是两套独立数据，页面分别展示。
 
 项目默认使用公共 API 和公共 RPC。可选的 `COINGECKO_API_KEY` 仅通过运行环境变量读取，仓库不包含任何密钥。
