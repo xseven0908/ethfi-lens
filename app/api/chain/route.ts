@@ -16,9 +16,9 @@ const networks=[
 ] as const;
 
 const exitNetworks=[
-  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:120_000,indexed:false},
-  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false},
-  {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true},
+  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:99_999,indexed:false,rpcFallback:"https://eth.blockscout.com/api/eth-rpc"},
+  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false,rpcFallback:null},
+  {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true,rpcFallback:"https://base.gateway.tenderly.co"},
 ] as const;
 
 type ChainReading={name:(typeof networks)[number]["name"];shares:number;rate:number;staked:number;tokenSupply:number;blockNumber:number;ok:true};
@@ -58,7 +58,7 @@ const dataWord=(data:string,index:number)=>BigInt(`0x${data.slice(2+index*64,2+(
 const topicToAddress=(topic:string)=>`0x${topic.slice(-40)}`.toLowerCase();
 const dataToAddress=(data:string,index:number)=>`0x${data.slice(2+index*64+24,2+(index+1)*64)}`.toLowerCase();
 
-async function fetchAtomicLogs(network:(typeof exitNetworks)[number],topic:string,fromBlock:number){
+async function fetchExplorerLogs(network:(typeof exitNetworks)[number],topic:string,fromBlock:number){
   const params=new URLSearchParams({
     module:"logs",action:"getLogs",fromBlock:String(Math.max(0,fromBlock)),toBlock:"latest",
     address:network.queue,topic0:topic,page:"1",offset:"1000",
@@ -71,6 +71,20 @@ async function fetchAtomicLogs(network:(typeof exitNetworks)[number],topic:strin
   if(!Array.isArray(payload.result))throw new Error(`${network.name} explorer returned invalid logs`);
   if(payload.result.length>=1000)throw new Error(`${network.name} queue log window was truncated`);
   return payload.result;
+}
+
+async function fetchRpcLogs(network:(typeof exitNetworks)[number],topic:string,fromBlock:number){
+  if(!network.rpcFallback)throw new Error(`${network.name} has no queue RPC fallback`);
+  const response=await fetch(network.rpcFallback,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_getLogs",params:[{fromBlock:`0x${Math.max(0,fromBlock).toString(16)}`,toBlock:"latest",address:network.queue,topics:[topic]}]}),cache:"no-store",signal:AbortSignal.timeout(20_000)});
+  if(!response.ok)throw new Error(`${network.name} queue RPC unavailable`);
+  const payload=await response.json() as {result?:ExplorerLog[];error?:{message?:string}};
+  if(payload.error||!Array.isArray(payload.result))throw new Error(payload.error?.message||`${network.name} queue RPC returned invalid logs`);
+  return payload.result;
+}
+
+async function fetchAtomicLogs(network:(typeof exitNetworks)[number],topic:string,fromBlock:number){
+  try{return await fetchExplorerLogs(network,topic,fromBlock)}
+  catch{return fetchRpcLogs(network,topic,fromBlock)}
 }
 
 async function readAtomicQueue(network:(typeof exitNetworks)[number],chain:ChainReading){
