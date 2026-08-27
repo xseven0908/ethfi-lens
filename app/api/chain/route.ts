@@ -5,8 +5,12 @@ const ACCOUNTANT="0x05A1552c5e18F5A0BB9571b5F2D6a4765ebdA32b";
 const MAX_SUPPLY=1_000_000_000;
 const ATOMIC_UPDATED="0x9537495a2390e1a29f5f7e71b8540f5140bba27065f173615b770ad79d2f7960";
 const ATOMIC_FULFILLED="0xa4e3f90ef19273220b37cbbbcfe402a6eadd9559c54813b9be52ea0c9612d6c9";
+const BORING_REQUESTED="0x2eb08ebdb4d68b4a37e3b424927f3363e1d799ca7e56e7b2c59cc6c1778d33f5";
+const BORING_SOLVED="0xd94fc49a6578873ff851671d19cacb1809887f7a9128867ee4306dc3ffc93c26";
+const BORING_CANCELLED="0x114ef421aef557f2e4086396789e7fb532b1133ff2982c9d948daa73d0691e36";
 const MAINNET_ATOMIC_QUEUE="0xD45884B592E316eB816199615A95C182F75dea07";
 const L2_ATOMIC_QUEUE="0xB149EF0f2539f1D9E1C9fd98d86E9C13A2aeC17A";
+const OP_BORING_QUEUE="0xF03352da1536F31172A7F7cB092D4717DeDDd3CB";
 
 const networks=[
   {name:"Ethereum",rpcs:["https://ethereum-rpc.publicnode.com","https://eth.drpc.org","https://eth.blockscout.com/api/eth-rpc","https://eth.llamarpc.com","https://rpc.flashbots.net"],ethfi:"0xfe0c30065b384f05761f15d0cc899d4f9f9cc0eb"},
@@ -125,10 +129,51 @@ async function readAtomicQueue(network:(typeof exitNetworks)[number],chain:Chain
       requestCount:open.length,requestWindow:open.reduce((max,item)=>Math.max(max,item.duration),0),
       nextDeadline:open.length?new Date(Math.min(...open.map(item=>item.deadline))*1000).toISOString():null,
       requests:open.map(item=>{const shares=Number(item.amount)/1e18;return {account:item.user,pendingShares:shares,pending:shares*chain.rate,deadline:new Date(item.deadline*1000).toISOString(),txHash:item.txHash,accountUrl:`${network.addressExplorer}/address/${item.user}`,txUrl:`${network.addressExplorer}/tx/${item.txHash}`}}),
-      scannedEvents:events.length,available:true,
+      scannedEvents:events.length,available:true,queueSupported:true,status:"AtomicQueue 链上实时",
     };
   }catch{
-    return {name:network.name,queueContract:network.queue,queueType:"AtomicQueue",pendingShares:0,pending:0,requestCount:0,requestWindow:0,nextDeadline:null,requests:[],scannedEvents:0,available:false};
+    return {name:network.name,queueContract:network.queue,queueType:"AtomicQueue",pendingShares:0,pending:0,requestCount:0,requestWindow:0,nextDeadline:null,requests:[],scannedEvents:0,available:false,queueSupported:true,status:"AtomicQueue 暂不可读"};
+  }
+}
+
+async function fetchOptimismBoringLogs(topic:string,fromBlock:number){
+  const params=new URLSearchParams({module:"logs",action:"getLogs",fromBlock:String(Math.max(0,fromBlock)),toBlock:"latest",address:OP_BORING_QUEUE,topic0:topic,page:"1",offset:"1000"});
+  const response=await fetch(`https://optimism.blockscout.com/api?${params}`,{cache:"no-store",signal:AbortSignal.timeout(20_000)});
+  if(!response.ok)throw new Error("Optimism queue explorer unavailable");
+  const payload=await response.json() as {message?:string;result?:ExplorerLog[]|string};
+  if(payload.message==="No records found"||payload.message==="No logs found")return [];
+  if(!Array.isArray(payload.result)||payload.result.length>=1000)throw new Error("Optimism queue logs unavailable or truncated");
+  return payload.result;
+}
+
+async function readOptimismBoringQueue(chain:ChainReading){
+  try{
+    const fromBlock=chain.blockNumber-1_000_000;
+    const [requested,solved,cancelled]=await Promise.all([
+      fetchOptimismBoringLogs(BORING_REQUESTED,fromBlock),
+      fetchOptimismBoringLogs(BORING_SOLVED,fromBlock),
+      fetchOptimismBoringLogs(BORING_CANCELLED,fromBlock),
+    ]);
+    const closed=new Set([...solved,...cancelled].map(log=>log.topics[1]?.toLowerCase()).filter((value):value is string=>Boolean(value)));
+    const now=Math.floor(Date.now()/1000);
+    const open=requested.flatMap(log=>{
+      const requestId=log.topics[1]?.toLowerCase(),userTopic=log.topics[2],assetTopic=log.topics[3];
+      if(!requestId||!userTopic||!assetTopic||closed.has(requestId)||topicToAddress(assetTopic)!==networks[1].ethfi.toLowerCase())return [];
+      const createdAt=Number(dataWord(log.data,3)),secondsToDeadline=Number(dataWord(log.data,5)),deadline=createdAt+secondsToDeadline;
+      if(deadline<=now)return [];
+      return [{user:topicToAddress(userTopic),shares:dataWord(log.data,1),assets:dataWord(log.data,2),deadline,duration:secondsToDeadline,txHash:log.transactionHash}];
+    }).sort((a,b)=>a.deadline-b.deadline);
+    const pendingShares=open.reduce((sum,item)=>sum+Number(item.shares)/1e18,0);
+    const pending=open.reduce((sum,item)=>sum+Number(item.assets)/1e18,0);
+    return {
+      name:"Optimism",queueContract:OP_BORING_QUEUE,queueType:"BoringOnChainQueue",pendingShares,pending,
+      requestCount:open.length,requestWindow:open.reduce((max,item)=>Math.max(max,item.duration),0),
+      nextDeadline:open.length?new Date(open[0].deadline*1000).toISOString():null,
+      requests:open.map(item=>({account:item.user,pendingShares:Number(item.shares)/1e18,pending:Number(item.assets)/1e18,deadline:new Date(item.deadline*1000).toISOString(),txHash:item.txHash,accountUrl:`https://optimistic.etherscan.io/address/${item.user}`,txUrl:`https://optimistic.etherscan.io/tx/${item.txHash}`})),
+      scannedEvents:requested.length+solved.length+cancelled.length,available:true,queueSupported:true,status:"BoringOnChainQueue 链上实时",
+    };
+  }catch{
+    return {name:"Optimism",queueContract:OP_BORING_QUEUE,queueType:"BoringOnChainQueue",pendingShares:0,pending:0,requestCount:0,requestWindow:0,nextDeadline:null,requests:[],scannedEvents:0,available:false,queueSupported:true,status:"BoringOnChainQueue 暂不可读"};
   }
 }
 
@@ -142,14 +187,17 @@ export async function GET(){
   }
 
   const stakingChains=networkResults.map(result=>result.status==="fulfilled"?result.value:neverResult());
-  const exitQueues=await Promise.all(exitNetworks.map(network=>{
+  const trackedExitQueues=await Promise.all(exitNetworks.map(network=>{
     const chain=stakingChains.find(item=>item.name===network.name)!;
     return readAtomicQueue(network,chain);
   }));
+  const optimismQueue=await readOptimismBoringQueue(stakingChains.find(item=>item.name==="Optimism")!);
+  const exitQueues=["Ethereum","Optimism","Arbitrum","Base"].map(name=>name==="Optimism"?optimismQueue:trackedExitQueues.find(queue=>queue.name===name)!);
   const exitQueueComplete=exitQueues.every(queue=>queue.available);
   const chains=stakingChains.map(chain=>{
     const queue=exitQueues.find(item=>item.name===chain.name);
-    return {...chain,pendingShares:queue?.available?queue.pendingShares:0,pending:queue?.available?queue.pending:0,pendingRequests:queue?.available?queue.requestCount:0,pendingAvailable:queue?.available??false};
+    const pendingAvailable=queue?.queueSupported!==false&&(queue?.available??false);
+    return {...chain,pendingShares:pendingAvailable?queue!.pendingShares:0,pending:pendingAvailable?queue!.pending:0,pendingRequests:pendingAvailable?queue!.requestCount:0,pendingAvailable};
   });
   const ethereum=stakingChains.find(x=>x.name==="Ethereum")!;
   const mainnetSupply=ethereum.tokenSupply;
@@ -168,13 +216,14 @@ export async function GET(){
     pendingRequests:exitQueueComplete?exitQueues.reduce((sum,x)=>sum+x.requestCount,0):0,
     pendingCoverage:exitQueues.filter(queue=>queue.available).map(queue=>queue.name),
     pendingComplete:exitQueueComplete,
-    exitChain:"Ethereum · Arbitrum · Base",
+    pendingScope:"Ethereum、Arbitrum、Base 的 AtomicQueue；Optimism 的 BoringOnChainQueue",
+    exitChain:"Ethereum · Optimism · Arbitrum · Base",
     exitQueueAvailable:exitQueueComplete,
     requestWindow:exitQueueComplete?Math.max(...exitQueues.map(queue=>queue.requestWindow)):0,
     pendingLabel:"sETHFI AtomicQueue 退出队列",
     exitQueues,
     chains,
-    source:"Ethereum · Optimism · Arbitrum · Base 多 RPC 交叉容错；退出队列为 AtomicQueue 链上事件",
+    source:"Ethereum · Optimism · Arbitrum · Base 多 RPC 交叉容错；退出队列为 AtomicQueue 与 BoringOnChainQueue 链上事件",
     stale:false,
     updatedAt:new Date().toISOString(),
   },{headers:{"Cache-Control":"public, max-age=20, s-maxage=20, stale-while-revalidate=60"}});
