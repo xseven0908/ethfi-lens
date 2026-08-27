@@ -11,7 +11,7 @@ type ChainRow = { name:string; shares:number; rate:number; staked:number; pendin
 type ExitRequest = { account:string; pendingShares:number; pending:number; deadline:string; txHash:string; accountUrl:string; txUrl:string };
 type ExitQueue = { name:string; queueContract:string|null; queueType:string; pendingShares:number; pending:number; requestCount:number; requestWindow:number; nextDeadline:string|null; requests:ExitRequest[]; scannedEvents:number; available:boolean; queueSupported:boolean; status:string };
 type ChainData = { ethfiSupply:number; mainnetSupply:number; supplyAdjustment:number; burned:number; burnStatus:string; totalShares:number; exchangeRate:number; staked:number; pendingShares:number; pending:number; pendingRequests:number; pendingCoverage:string[]; pendingComplete:boolean; exitChain:string; exitQueueAvailable:boolean; requestWindow:number; pendingLabel:string; exitQueues:ExitQueue[]; chains:ChainRow[]; source:string; stale:boolean; updatedAt:string };
-type StakingHistory = { points:Array<[number,number,number]>; rangeDays:number; chains:string[]; source:string; method:string; rateUpdatedAt?:string; updatedAt:string };
+type StakingHistory = { points:Array<[number,number,number,number,number,number]>; rangeDays:number; chains:string[]; exitChains:string[]; complete:boolean; failedSources:string[]; source:string; method:string; refreshSeconds:number; rateUpdatedAt?:string; updatedAt:string };
 type BuybackData = { distributedTotal:number; distributed30d:number; distributed90d:number; distributionCount:number; latestDistribution:{timestamp:string;amount:number;txHash:string}|null; recentDistributions:Array<{timestamp:string;amount:number;txHash:string}>; walletBalance:number|null; foundationWallet:string; destination:string; weeklyPolicy:string; monthlyPolicy:string; treasuryCapUsd:number; priceCeilingUsd:number; confirmedBurned:number|null; burnStatus:string; source:string; updatedAt:string };
 
 const unlocks = [
@@ -35,21 +35,30 @@ const shortAddress = (value:string)=>`${value.slice(0,6)}…${value.slice(-4)}`;
 
 function stakingWindow(history:StakingHistory|null,days:number,now:number,chain:ChainData|null){
   if(!history||!chain||!now)return null;
-  const threshold=now-days*86_400_000,before=history.points.filter(x=>x[0]<=threshold).at(-1),within=history.points.filter(x=>x[0]>threshold),source=before?[before,...within]:within,points=source.map(x=>[x[0],x[1],x[2]] as [number,number,number]);
+  const threshold=now-days*86_400_000,before=history.points.filter(x=>x[0]<=threshold).at(-1),within=history.points.filter(x=>x[0]>threshold),source=before?[before,...within]:within,points=source.map(x=>[...x] as [number,number,number,number,number,number]);
   if(points.length<2)return null;
-  points[points.length-1]=[now,chain.totalShares,chain.staked];
+  const exitShares=chain.pendingComplete?chain.pendingShares:points.at(-1)![3],exitAssets=chain.pendingComplete?chain.pending:points.at(-1)![4];
+  points[points.length-1]=[now,chain.totalShares,chain.staked,exitShares,exitAssets,Math.max(0,chain.staked-exitAssets)];
   const first=points[0],last=points.at(-1)!,startRate=first[1]>0?first[2]/first[1]:0,endRate=chain.totalShares>0?chain.staked/chain.totalShares:0,elapsedDays=Math.max(1,(last[0]-first[0])/86_400_000),rateRatio=startRate>0?endRate/startRate:1;
-  return {points,chart:points.map(x=>[x[0],x[2]] as [number,number]),assetChange:last[2]-first[2],sharesChange:last[1]-first[1],rateReturn:(rateRatio-1)*100,annualized:(Math.pow(rateRatio,365/elapsedDays)-1)*100};
+  return {points,chart:points.map(x=>[x[0],x[2],x[4],x[5]] as [number,number,number,number]),assetChange:last[2]-first[2],sharesChange:last[1]-first[1],rateReturn:(rateRatio-1)*100,annualized:(Math.pow(rateRatio,365/elapsedDays)-1)*100};
 }
 
-function TrendChart({data,positive,label="ETHFI 价格趋势图",className="trend-canvas"}:{data:Array<[number,number]>;positive:boolean;label?:string;className?:string}) {
+function TrendChart({data,positive,label="ETHFI 价格趋势图",className="trend-canvas"}:{data:Array<[number,number]|[number,number,number,number]>;positive:boolean;label?:string;className?:string}) {
   const canvasRef=useRef<HTMLCanvasElement>(null);
+  const combined=data[0]?.length===4,latest=combined?data.at(-1) as [number,number,number,number]:null;
   useEffect(()=>{
     const canvas=canvasRef.current; if(!canvas||data.length<2)return;
     const render=()=>{
       const box=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1;
       canvas.width=Math.max(1,box.width*scale); canvas.height=Math.max(1,box.height*scale);
       const ctx=canvas.getContext("2d"); if(!ctx)return; ctx.scale(scale,scale);
+      if(data[0]?.length===4){
+        const rows=data as Array<[number,number,number,number]>,w=box.width,h=box.height,p={top:20,right:18,bottom:20,left:18},gross=rows.flatMap(x=>[x[1],x[3]]),grossMin=Math.min(...gross),grossMax=Math.max(...gross),pad=Math.max(1,(grossMax-grossMin)*.12),leftMin=Math.max(0,grossMin-pad),leftMax=grossMax+pad,leftRange=leftMax-leftMin||1,exitMax=Math.max(1,...rows.map(x=>x[2]))*1.12,chartW=w-p.left-p.right,chartH=h-p.top-p.bottom;
+        const x=(i:number)=>p.left+i/(rows.length-1)*chartW,yLeft=(value:number)=>p.top+(leftMax-value)/leftRange*chartH,yRight=(value:number)=>p.top+(exitMax-value)/exitMax*chartH;
+        ctx.clearRect(0,0,w,h);ctx.strokeStyle="rgba(24,27,26,.08)";ctx.lineWidth=1;for(let i=0;i<4;i++){const y=p.top+chartH/3*i;ctx.beginPath();ctx.moveTo(p.left,y);ctx.lineTo(w-p.right,y);ctx.stroke()}
+        const draw=(index:1|2|3,color:string,width:number,y:(value:number)=>number,dash:number[]=[])=>{ctx.beginPath();rows.forEach((point,i)=>i?ctx.lineTo(x(i),y(point[index])):ctx.moveTo(x(i),y(point[index])));ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineJoin="round";ctx.setLineDash(dash);ctx.stroke();ctx.setLineDash([]);const last=rows.at(-1)!;ctx.beginPath();ctx.arc(x(rows.length-1),y(last[index]),3.5,0,Math.PI*2);ctx.fillStyle=color;ctx.fill()};
+        const gradient=ctx.createLinearGradient(0,p.top,0,h-p.bottom);gradient.addColorStop(0,"rgba(205,132,48,.22)");gradient.addColorStop(1,"rgba(205,132,48,0)");ctx.beginPath();rows.forEach((point,i)=>i?ctx.lineTo(x(i),yRight(point[2])):ctx.moveTo(x(i),yRight(point[2])));ctx.lineTo(x(rows.length-1),h-p.bottom);ctx.lineTo(x(0),h-p.bottom);ctx.closePath();ctx.fillStyle=gradient;ctx.fill();draw(1,"#2f6f5e",2.4,yLeft);draw(3,"#202523",2,yLeft,[5,4]);draw(2,"#cd8430",2,yRight);return;
+      }
       const w=box.width,h=box.height,p={top:20,right:10,bottom:22,left:10},values=data.map(x=>x[1]),min=Math.min(...values),max=Math.max(...values),range=max-min||1;
       const color=positive?"#277a63":"#b45a43"; ctx.clearRect(0,0,w,h); ctx.strokeStyle="rgba(24,27,26,.08)"; ctx.lineWidth=1;
       for(let i=0;i<4;i++){const y=p.top+((h-p.top-p.bottom)/3)*i;ctx.beginPath();ctx.moveTo(p.left,y);ctx.lineTo(w-p.right,y);ctx.stroke()}
@@ -60,7 +69,7 @@ function TrendChart({data,positive,label="ETHFI 价格趋势图",className="tren
       const last=pts.at(-1)!;ctx.beginPath();ctx.arc(last.x,last.y,4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
     }; render(); const observer=new ResizeObserver(render);observer.observe(canvas);return()=>observer.disconnect();
   },[data,positive]);
-  return <canvas ref={canvasRef} className={className} aria-label={label}/>;
+  return <>{combined&&latest?<div className="stake-flow-legend"><span className="gross"><i/>总质押 <b>{compact(latest[1])}</b></span><span className="net"><i/>净质押 <b>{compact(latest[3])}</b></span><span className="exit"><i/>退出中 <b>{compact(latest[2])}</b></span><em>双轴 · ETHFI</em></div>:null}<canvas ref={canvasRef} className={combined?"stake-flow-canvas":className} aria-label={combined?"sETHFI 总质押、退出中与净质押历史趋势图":label}/></>;
 }
 
 function MetricCard({eyebrow,value,meta,tone,onClick}:{eyebrow:string;value:string;meta:string;tone?:"positive"|"negative"|"warning";onClick:()=>void}){
@@ -95,9 +104,9 @@ function DetailDrawer({active,onClose,market,chain,stakingHistory,buyback,curren
 export default function Home(){
   const [market,setMarket]=useState<MarketData|null>(null),[chain,setChain]=useState<ChainData|null>(null),[stakingHistory,setStakingHistory]=useState<StakingHistory|null>(null),[buyback,setBuyback]=useState<BuybackData|null>(null),[currency,setCurrency]=useState<Currency>("usd"),[period,setPeriod]=useState<Period>("30D"),[stakingPeriod,setStakingPeriod]=useState<Period>("30D"),[detail,setDetail]=useState<DetailKey>(null),[refreshing,setRefreshing]=useState(true),[loadError,setLoadError]=useState<string|null>(null),[historyLoading,setHistoryLoading]=useState(true);
   const loadData=useCallback(async(force=false)=>{setRefreshing(true);setLoadError(null);if(force){setMarket(null);setChain(null);setBuyback(null)}const suffix=force?`&refresh=${Date.now()}`:"";try{const [m,c,b]=await Promise.allSettled([fetch(`/api/market?currency=${currency}${suffix}`).then(r=>{if(!r.ok)throw new Error();return r.json()}),fetch(`/api/chain?${force?`refresh=${Date.now()}`:"source=auto"}`).then(r=>{if(!r.ok)throw new Error();return r.json()}),fetch(`/api/buyback?${force?`refresh=${Date.now()}`:"source=auto"}`).then(r=>{if(!r.ok)throw new Error();return r.json()})]);if(m.status==="fulfilled")setMarket(m.value);if(c.status==="fulfilled")setChain(c.value);if(b.status==="fulfilled")setBuyback(b.value);if(m.status==="rejected"||c.status==="rejected"||b.status==="rejected")setLoadError("部分实时数据暂时不可用")}finally{setRefreshing(false)}},[currency]);
-  const loadHistory=useCallback(async(force=false)=>{if(force)setStakingHistory(null);setHistoryLoading(true);try{const response=await fetch(`/api/staking-history?${force?`refresh=${Date.now()}`:"source=auto"}`);if(!response.ok)throw new Error();setStakingHistory(await response.json())}catch{setStakingHistory(null)}finally{setHistoryLoading(false)}},[]);
+  const loadHistory=useCallback(async(force=false)=>{if(force)setStakingHistory(null);setHistoryLoading(true);try{const response=await fetch(`/api/staking-history?${force?`refresh=${Date.now()}`:"source=auto"}`);if(!response.ok)throw new Error();setStakingHistory(await response.json())}catch{if(force)setStakingHistory(null)}finally{setHistoryLoading(false)}},[]);
   useEffect(()=>{const initial=window.setTimeout(()=>loadData(),0),timer=window.setInterval(()=>loadData(),30_000);return()=>{window.clearTimeout(initial);window.clearInterval(timer)}},[loadData]);
-  useEffect(()=>{const initial=window.setTimeout(()=>loadHistory(),0),timer=window.setInterval(()=>loadHistory(),900_000);return()=>{window.clearTimeout(initial);window.clearInterval(timer)}},[loadHistory]);
+  useEffect(()=>{const initial=window.setTimeout(()=>loadHistory(),0),timer=window.setInterval(()=>loadHistory(),300_000);return()=>{window.clearTimeout(initial);window.clearInterval(timer)}},[loadHistory]);
   const referenceTime=market&&chain?Math.max(new Date(market.updatedAt).getTime(),new Date(chain.updatedAt).getTime()):0;
   const filteredChart=useMemo(()=>{if(!market)return[];const wanted=period==="7D"?7:period==="30D"?30:90,threshold=referenceTime-wanted*86_400_000,selected=market.chart.filter(x=>x[0]>=threshold);return selected.length>1?selected:market.chart.slice(-wanted)},[market,period,referenceTime]);
   const stakingStats=useMemo(()=>stakingWindow(stakingHistory,stakingPeriod==="7D"?7:stakingPeriod==="30D"?30:90,referenceTime,chain),[stakingHistory,stakingPeriod,referenceTime,chain]);
