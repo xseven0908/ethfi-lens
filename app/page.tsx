@@ -8,7 +8,8 @@ type DetailKey = "price" | "supply" | "staking" | "unlock" | "buyback" | "volume
 type Venue = { name:string; price:number; change24h:number; volume24h:number; high24h:number; low24h:number };
 type MarketData = { price:number; change24h:number; marketCap:number; fdv:number; volume24h:number; circulatingSupply:number; totalSupply:number; high24h:number; low24h:number; ath:number; athDate:string; chart:Array<[number,number]>; chartSource:string; venues:Venue[]; volumeScope:string; circulatingSource:string; fxSource:string; source:string; stale:boolean; updatedAt:string };
 type ChainRow = { name:string; shares:number; rate:number; staked:number; pendingShares:number; pending:number; pendingRequests:number; pendingAvailable:boolean; tokenSupply:number; blockNumber:number; ok:boolean };
-type ExitQueue = { name:string; queueContract:string; queueType:string; pendingShares:number; pending:number; requestCount:number; requestWindow:number; nextDeadline:string|null; scannedEvents:number; available:boolean };
+type ExitRequest = { account:string; pendingShares:number; pending:number; deadline:string; txHash:string; accountUrl:string; txUrl:string };
+type ExitQueue = { name:string; queueContract:string; queueType:string; pendingShares:number; pending:number; requestCount:number; requestWindow:number; nextDeadline:string|null; requests:ExitRequest[]; scannedEvents:number; available:boolean };
 type ChainData = { ethfiSupply:number; mainnetSupply:number; supplyAdjustment:number; burned:number; burnStatus:string; totalShares:number; exchangeRate:number; staked:number; pendingShares:number; pending:number; pendingRequests:number; pendingCoverage:string[]; pendingComplete:boolean; exitChain:string; exitQueueAvailable:boolean; requestWindow:number; pendingLabel:string; exitQueues:ExitQueue[]; chains:ChainRow[]; source:string; stale:boolean; updatedAt:string };
 type StakingHistory = { points:Array<[number,number,number]>; rangeDays:number; chains:string[]; source:string; method:string; rateUpdatedAt?:string; updatedAt:string };
 type BuybackData = { distributedTotal:number; distributed30d:number; distributed90d:number; distributionCount:number; latestDistribution:{timestamp:string;amount:number;txHash:string}|null; recentDistributions:Array<{timestamp:string;amount:number;txHash:string}>; walletBalance:number|null; foundationWallet:string; destination:string; weeklyPolicy:string; monthlyPolicy:string; treasuryCapUsd:number; priceCeilingUsd:number; confirmedBurned:number|null; burnStatus:string; source:string; updatedAt:string };
@@ -30,6 +31,7 @@ const fullNumber = (v:number)=>new Intl.NumberFormat("zh-CN",{maximumFractionDig
 const daysUntil = (date:string,now:number)=>Math.max(0,Math.ceil((new Date(`${date}T00:00:00+08:00`).getTime()-now)/86_400_000));
 const formatTime = (value:string)=>new Intl.DateTimeFormat("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}).format(new Date(value));
 const formatDateTime = (value:string)=>new Intl.DateTimeFormat("zh-CN",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}).format(new Date(value));
+const shortAddress = (value:string)=>`${value.slice(0,6)}…${value.slice(-4)}`;
 
 function stakingWindow(history:StakingHistory|null,days:number,now:number,chain:ChainData|null){
   if(!history||!chain||!now)return null;
@@ -69,6 +71,12 @@ function DashboardLoading({error,onRetry}:{error:string|null;onRetry:()=>void}){
   return <section className="dashboard-loading" aria-live="polite"><div className="loading-head"><span className={error?"fallback-dot":"live-dot"}/><div><strong>{error||"正在获取实时数据"}</strong><small>{error?"不会显示缓存或默认数字":"行情、供应和四链合约将同时载入"}</small></div>{error&&<button type="button" onClick={onRetry}>重新获取</button>}</div><div className="loading-metrics">{Array.from({length:6},(_,i)=><i key={i}/>)}</div><div className="loading-panels"><i/><i/><i/></div></section>;
 }
 
+function ExitAccountList({queues}:{queues:ExitQueue[]}){
+  const active=queues.filter(queue=>queue.available&&queue.requests.length>0);
+  if(!active.length)return null;
+  return <section className="exit-account-section"><div className="exit-account-title"><div><span>退出中账号清单</span><small>按当前请求 deadline 排序 · 点击账号核验</small></div><b>{active.reduce((sum,queue)=>sum+queue.requests.length,0)} 个账号</b></div>{active.map(queue=><div className="exit-account-chain" key={queue.name}><div><strong>{queue.name}</strong><span>{queue.requestCount} 笔 · {compact(queue.pendingShares)} sETHFI</span></div><div className="exit-account-list">{queue.requests.map(request=><div className="exit-account-row" key={`${queue.name}-${request.account}-${request.txHash}`}><a href={request.accountUrl} target="_blank" rel="noreferrer" title={request.account}><span>{shortAddress(request.account)}</span><em>浏览器 ↗</em></a><div><strong>{compact(request.pendingShares)} sETHFI</strong><small>约 {compact(request.pending)} ETHFI</small></div><div><span>请求截止</span><small>{formatDateTime(request.deadline)}</small></div><a className="exit-tx-link" href={request.txUrl} target="_blank" rel="noreferrer" aria-label={`查看 ${request.account} 的退出交易`}>交易 ↗</a></div>)}</div></div>)}</section>;
+}
+
 function DetailDrawer({active,onClose,market,chain,stakingHistory,buyback,currency}:{active:DetailKey;onClose:()=>void;market:MarketData;chain:ChainData;stakingHistory:StakingHistory|null;buyback:BuybackData|null;currency:Currency}){
   useEffect(()=>{const close=(e:KeyboardEvent)=>e.key==="Escape"&&onClose();window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close)},[onClose]);
   if(!active)return null;
@@ -82,7 +90,7 @@ function DetailDrawer({active,onClose,market,chain,stakingHistory,buyback,curren
     volume:{title:"交易与流动性",kicker:"Market activity",body:<><div className="drawer-hero"><span>24H 三所现货成交额</span><strong>{money(market.volume24h,currency,0)}</strong><em>成交额 / 市值 {(market.volume24h/market.marketCap*100).toFixed(1)}%</em></div><div className="detail-grid"><div><span>流通市值</span><strong>{money(market.marketCap,currency,0)}</strong></div><div><span>FDV</span><strong>{money(market.fdv,currency,0)}</strong></div><div><span>流通率</span><strong>{(market.circulatingSupply/market.totalSupply*100).toFixed(1)}%</strong></div><div><span>24H 振幅</span><strong>{((market.high24h-market.low24h)/market.low24h*100).toFixed(1)}%</strong></div></div><p className="drawer-note">口径：{market.volumeScope}。不包含其他 CEX、DEX 或链上 Transfer，因此不会误标成“全市场成交额”。</p></>},
   };
   const current=content[active];
-  return <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={current.title}><button className="drawer-backdrop" onClick={onClose} aria-label="关闭详情"/><aside className="detail-drawer"><div className="drawer-head"><div><span>{current.kicker}</span><h2>{current.title}</h2></div><button type="button" onClick={onClose} aria-label="关闭">×</button></div><div className="drawer-body">{current.body}</div><div className="drawer-source"><span className={market.stale||chain.stale?"fallback-dot":"live-dot"}/> 数据更新于 {formatTime(active==="price"||active==="volume"?market.updatedAt:active==="buyback"&&buyback?buyback.updatedAt:chain.updatedAt)}</div></aside></div>;
+  return <div className="drawer-layer" role="dialog" aria-modal="true" aria-label={current.title}><button className="drawer-backdrop" onClick={onClose} aria-label="关闭详情"/><aside className="detail-drawer"><div className="drawer-head"><div><span>{current.kicker}</span><h2>{current.title}</h2></div><button type="button" onClick={onClose} aria-label="关闭">×</button></div><div className="drawer-body">{current.body}{active==="staking"&&chain.exitQueueAvailable?<ExitAccountList queues={chain.exitQueues}/>:null}</div><div className="drawer-source"><span className={market.stale||chain.stale?"fallback-dot":"live-dot"}/> 数据更新于 {formatTime(active==="price"||active==="volume"?market.updatedAt:active==="buyback"&&buyback?buyback.updatedAt:chain.updatedAt)}</div></aside></div>;
 }
 
 export default function Home(){

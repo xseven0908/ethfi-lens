@@ -16,9 +16,9 @@ const networks=[
 ] as const;
 
 const exitNetworks=[
-  {name:"Ethereum",explorer:"https://eth.blockscout.com",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:99_999,indexed:false,rpcFallback:"https://mainnet.gateway.tenderly.co"},
-  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false,rpcFallback:null},
-  {name:"Base",explorer:"https://base.blockscout.com",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true,rpcFallback:"https://base.gateway.tenderly.co"},
+  {name:"Ethereum",explorer:"https://eth.blockscout.com",addressExplorer:"https://etherscan.io",queue:MAINNET_ATOMIC_QUEUE,lookbackBlocks:99_999,indexed:false,rpcFallback:"https://mainnet.gateway.tenderly.co"},
+  {name:"Arbitrum",explorer:"https://arbitrum.blockscout.com",addressExplorer:"https://arbiscan.io",queue:L2_ATOMIC_QUEUE,lookbackBlocks:6_000_000,indexed:false,rpcFallback:null},
+  {name:"Base",explorer:"https://base.blockscout.com",addressExplorer:"https://basescan.org",queue:L2_ATOMIC_QUEUE,lookbackBlocks:800_000,indexed:true,rpcFallback:"https://base.gateway.tenderly.co"},
 ] as const;
 
 type ChainReading={name:(typeof networks)[number]["name"];shares:number;rate:number;staked:number;tokenSupply:number;blockNumber:number;ok:true};
@@ -103,7 +103,7 @@ async function readAtomicQueue(network:(typeof exitNetworks)[number],chain:Chain
       const indexA=BigInt(a.log.logIndex),indexB=BigInt(b.log.logIndex);
       return indexA===indexB?0:indexA<indexB?-1:1;
     });
-    const latest=new Map<string,{kind:"updated"|"fulfilled";amount:bigint;deadline:number;duration:number;txHash:string}>();
+    const latest=new Map<string,{kind:"updated"|"fulfilled";user:string;amount:bigint;deadline:number;duration:number;txHash:string}>();
     for(const event of events){
       const indexed=event.log.topics.length>=4&&event.log.topics[1]!=null&&event.log.topics[2]!=null&&event.log.topics[3]!=null;
       const user=indexed?topicToAddress(event.log.topics[1]!):dataToAddress(event.log.data,0);
@@ -113,21 +113,22 @@ async function readAtomicQueue(network:(typeof exitNetworks)[number],chain:Chain
       const key=`${user}|${offer}|${want}`,offset=indexed?0:3;
       if(event.kind==="updated"){
         const deadline=Number(dataWord(event.log.data,offset+1)),createdAt=Number(dataWord(event.log.data,offset+3));
-        latest.set(key,{kind:event.kind,amount:dataWord(event.log.data,offset),deadline,duration:Math.max(0,deadline-createdAt),txHash:event.log.transactionHash});
-      }else latest.set(key,{kind:event.kind,amount:0n,deadline:0,duration:0,txHash:event.log.transactionHash});
+        latest.set(key,{kind:event.kind,user,amount:dataWord(event.log.data,offset),deadline,duration:Math.max(0,deadline-createdAt),txHash:event.log.transactionHash});
+      }else latest.set(key,{kind:event.kind,user,amount:0n,deadline:0,duration:0,txHash:event.log.transactionHash});
     }
     const now=Math.floor(Date.now()/1000);
-    const open=[...latest.values()].filter(item=>item.kind==="updated"&&item.amount>0n&&item.deadline>now);
+    const open=[...latest.values()].filter(item=>item.kind==="updated"&&item.amount>0n&&item.deadline>now).sort((a,b)=>a.deadline-b.deadline);
     const pendingRaw=open.reduce((sum,item)=>sum+item.amount,0n);
     const pendingShares=Number(pendingRaw)/1e18;
     return {
       name:network.name,queueContract:network.queue,queueType:"AtomicQueue",pendingShares,pending:pendingShares*chain.rate,
       requestCount:open.length,requestWindow:open.reduce((max,item)=>Math.max(max,item.duration),0),
       nextDeadline:open.length?new Date(Math.min(...open.map(item=>item.deadline))*1000).toISOString():null,
+      requests:open.map(item=>{const shares=Number(item.amount)/1e18;return {account:item.user,pendingShares:shares,pending:shares*chain.rate,deadline:new Date(item.deadline*1000).toISOString(),txHash:item.txHash,accountUrl:`${network.addressExplorer}/address/${item.user}`,txUrl:`${network.addressExplorer}/tx/${item.txHash}`}}),
       scannedEvents:events.length,available:true,
     };
   }catch{
-    return {name:network.name,queueContract:network.queue,queueType:"AtomicQueue",pendingShares:0,pending:0,requestCount:0,requestWindow:0,nextDeadline:null,scannedEvents:0,available:false};
+    return {name:network.name,queueContract:network.queue,queueType:"AtomicQueue",pendingShares:0,pending:0,requestCount:0,requestWindow:0,nextDeadline:null,requests:[],scannedEvents:0,available:false};
   }
 }
 
