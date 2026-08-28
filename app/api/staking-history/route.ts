@@ -50,6 +50,7 @@ async function json(url:string,timeout=10_000){
       if(response.status===429){blockedExplorers.set(hostname,Date.now()+60_000);throw new Error(`Explorer 429 ${hostname}`)}
       if(!response.ok)throw new Error(`Explorer ${response.status} ${hostname}`);
       const payload=await response.json();
+      if(/rate limit/i.test(`${payload.message||""} ${payload.result||""}`)){blockedExplorers.set(hostname,Date.now()+60_000);throw new Error(`Explorer 429 ${hostname}`)}
       if(String(payload.status)==="0"&&/no (records|logs) found/i.test(`${payload.message||""} ${payload.result||""}`))payload.result=[];
       if(String(payload.status)!=="1"&&!Array.isArray(payload.result))throw new Error(payload.message||"Explorer unavailable");
       return payload;
@@ -75,6 +76,12 @@ async function currentNetwork(rpcs:readonly string[]){
     }catch(error){lastError=error}
   }
   throw lastError instanceof Error?lastError:new Error("Network RPC unavailable");
+}
+
+async function readCurrentRate(){
+  let lastError:unknown;
+  for(const rpcUrl of networks[0].rpcs){try{return Number(BigInt(await rpc(rpcUrl,"eth_call",[{to:ACCOUNTANT,data:"0x679aefce"},"latest"])))/1e18}catch(error){lastError=error}}
+  throw lastError instanceof Error?lastError:new Error("Accountant RPC unavailable");
 }
 
 async function topicLogs(explorer:string,address:string,topic:string,fromBlock:number,toBlock:number,extra=""):Promise<ExplorerLog[]>{
@@ -142,8 +149,9 @@ export async function GET(){
   if(cachedHistory&&Date.now()-cachedAt<HISTORY_REFRESH_MS)return NextResponse.json(cachedHistory,{headers});
   try{
     const now=Math.floor(Date.now()/1000),cutoff=now-91*DAY;
-    const [contexts,rates]=await Promise.all([Promise.all(networks.map(async network=>{const current=await currentNetwork(network.rpcs),supplyFromBlock=Math.max(0,current.block-network.supplyLookbackBlocks),exitFromBlock=Math.max(0,current.block-network.exitLookbackBlocks);return {network,current,supplyFromBlock,exitFromBlock}})),rateEvents()]);
-    const failedSources:string[]=[];
+    const [contexts,historicalRates,liveRate]=await Promise.all([Promise.all(networks.map(async network=>{const current=await currentNetwork(network.rpcs),supplyFromBlock=Math.max(0,current.block-network.supplyLookbackBlocks),exitFromBlock=Math.max(0,current.block-network.exitLookbackBlocks);return {network,current,supplyFromBlock,exitFromBlock}})),rateEvents().catch(()=>[] as RateEvent[]),readCurrentRate()]);
+    const rateHistoryAvailable=historicalRates.length>0,rates=rateHistoryAvailable?[...historicalRates,{timestamp:now,rate:liveRate}]:[{timestamp:cutoff,rate:liveRate},{timestamp:now,rate:liveRate}];
+    const failedSources:string[]=rateHistoryAvailable?[]:["兑换率历史"];
     const histories=await Promise.all(contexts.map(async context=>{
       const exitNetwork=exitNetworks.find(network=>network.name===context.network.name)!;
       let supply:Awaited<ReturnType<typeof supplyEvents>>;
