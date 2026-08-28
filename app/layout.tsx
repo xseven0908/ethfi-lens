@@ -10,12 +10,12 @@ export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
   const host = requestHeaders.get("host") || "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
-  const preview = `${protocol}://${host}/og.png`;
+  const preview = `${protocol}://${host}/og-v2.png`;
   return {
-    title: "ETHFI Lens — 代币数据看板",
-    description: "清晰追踪 ETHFI 价格、供应、质押、解押、解锁与协议动作。",
-    openGraph: { title: "ETHFI Lens", description: "价格 · 供应 · 质押 · 解锁", images: [{ url: preview }] },
-    twitter: { card: "summary_large_image", title: "ETHFI Lens", description: "价格 · 供应 · 质押 · 解锁", images: [preview] },
+    title: "Token Lens — ETHFI 与 BP 代币数据看板",
+    description: "清晰追踪 ETHFI 与 BP 的价格、供应、质押、解押、解锁及链上权限。",
+    openGraph: { title: "Token Lens · ETHFI / BP", description: "市场 · 供应 · 质押 · 解锁", images: [{ url: preview }] },
+    twitter: { card: "summary_large_image", title: "Token Lens · ETHFI / BP", description: "市场 · 供应 · 质押 · 解锁", images: [preview] },
   };
 }
 
