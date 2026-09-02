@@ -21,19 +21,21 @@ test("server-renders the Token Lens production shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN">/i);
-  assert.match(html, /<title>Token Lens — ETHFI、BP、PENDLE 与 HYPE 数据看板<\/title>/i);
+  assert.match(html, /<title>Token Lens — ETHFI、BP、PENDLE 与 HYPE 对比看板<\/title>/i);
   assert.match(html, /TOKEN/);
   assert.match(html, /ETHFI/);
   assert.match(html, /Backpack/);
   assert.match(html, /PENDLE/);
   assert.match(html, /HYPE/);
-  assert.match(html, /正在获取实时数据/);
+  assert.match(html, /四币对比/);
+  assert.match(html, /四种代币/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
 });
 
-test("keeps all four asset dashboards and production metadata wired", async () => {
-  const [page, pendle, pendleApi, marketsApi, hype, hypeApi, layout, packageJson] = await Promise.all([
+test("keeps comparison home and all four asset dashboards wired", async () => {
+  const [page, compare, pendle, pendleApi, marketsApi, hype, hypeApi, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/compare-dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/pendle-dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/pendle/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/pendle-markets/route.ts", import.meta.url), "utf8"),
@@ -42,7 +44,11 @@ test("keeps all four asset dashboards and production metadata wired", async () =
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /type AssetView = "ethfi" \| "bp" \| "pendle" \| "hype"/);
+  assert.match(page, /type AssetView = "compare" \| "ethfi" \| "bp" \| "pendle" \| "hype"/);
+  assert.match(page, /<CompareDashboard/);
+  assert.match(compare, /核心指标矩阵/);
+  assert.match(compare, /优势地图/);
+  assert.match(compare, /未来事件与持续压力/);
   assert.match(page, /<PendleDashboard/);
   assert.match(pendle, /sPENDLE 与协议收入/);
   assert.match(pendle, /头部活跃收益市场/);
