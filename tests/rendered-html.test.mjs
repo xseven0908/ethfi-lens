@@ -28,7 +28,9 @@ test("server-renders the Token Lens production shell", async () => {
   assert.match(html, /PENDLE/);
   assert.match(html, /HYPE/);
   assert.match(html, /四币对比/);
-  assert.match(html, /四种代币/);
+  assert.match(html, /先看谁领先/);
+  assert.match(html, /USD 统一口径/);
+  assert.doesNotMatch(html, /CNY/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
 });
 
@@ -47,8 +49,12 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
   assert.match(page, /type AssetView = "compare" \| "ethfi" \| "bp" \| "pendle" \| "hype"/);
   assert.match(page, /<CompareDashboard/);
   assert.match(compare, /核心指标矩阵/);
+  assert.match(compare, /30D 相对价格走势/);
+  assert.match(compare, /CompareTrendChart/);
   assert.match(compare, /优势地图/);
   assert.match(compare, /未来事件与持续压力/);
+  assert.match(compare, /risk-table/);
+  assert.doesNotMatch(page, /setCurrency|>CNY</);
   assert.match(page, /<PendleDashboard/);
   assert.match(pendle, /sPENDLE 与协议收入/);
   assert.match(pendle, /头部活跃收益市场/);
