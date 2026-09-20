@@ -76,24 +76,23 @@ export async function GET(){
     balanceOf(ENA,SENA).then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
     protocolMetrics().then(value=>({value,error:false as const})).catch(()=>({value:{uni:null,aave:null,ena:null,xpl:null} as Record<ExpandedTokenId,number|null>,error:true as const})),
   ]);
-  if(!marketsResult.value.length&&!paprikaResult.value.length)return NextResponse.json({error:"新增资产实时行情暂时不可用",updatedAt:new Date().toISOString()},{status:503,headers:{"Cache-Control":"no-store"}});
   const marketMap=new Map(paprikaResult.value.map(row=>[row.id,row]));for(const row of marketsResult.value)marketMap.set(row.id,row);
   const updatedAt=new Date().toISOString();
   const assets:ExpandedAssetSnapshot[]=definitions.map((definition,index)=>{
     const market=marketMap.get(definition.cgId),total=Number(market?.total_supply)||definition.verified.total,overall=Number(market?.max_supply)||definition.verified.overall,circulating=Number(market?.circulating_supply)||definition.verified.circulating;
-    const chartResult=chartsResult[index],price=Number(market?.current_price)||null;
+    const chartResult=chartsResult[index],chartRows=chartResult.status==="fulfilled"?chartResult.value:[],lastPrice=chartRows.at(-1)?.[1]??null,price=Number(market?.current_price)||lastPrice;
     const stakingAmount=definition.id==="aave"?aaveStakeResult.value:definition.id==="ena"?enaStakeResult.value:null;
     const businessValue=businessResult.value[definition.id];
     const canDeriveBurn=definition.id==="uni"&&overall!=null&&total!=null&&overall>=total;
-    const failedSources=[chartResult.status!=="fulfilled"&&"Binance 日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="xpl"&&"Plasma 验证者聚合",businessValue==null&&"协议规模"].filter(Boolean) as string[];
+    const failedSources=[!market&&"聚合行情",chartResult.status!=="fulfilled"&&"Binance 日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="xpl"&&"Plasma 验证者聚合",businessValue==null&&"协议规模"].filter(Boolean) as string[];
     return {
       id:definition.id,name:definition.name,project:definition.project,category:definition.category,color:definition.color,
-      price,change24h:Number.isFinite(Number(market?.price_change_percentage_24h))?Number(market?.price_change_percentage_24h):null,
-      marketCap:Number(market?.market_cap)||null,fdv:Number(market?.fully_diluted_valuation)||(price&&overall?price*overall:null),volume24h:Number(market?.total_volume)||null,
+      price,change24h:Number.isFinite(Number(market?.price_change_percentage_24h))?Number(market?.price_change_percentage_24h):chartRows.length>1?(chartRows.at(-1)![1]/chartRows.at(-2)![1]-1)*100:null,
+      marketCap:Number(market?.market_cap)||(price?price*circulating:null),fdv:Number(market?.fully_diluted_valuation)||(price?price*overall:null),volume24h:Number(market?.total_volume)||null,
       circulatingSupply:circulating,totalSupply:total,overallSupply:overall,burnedSupply:canDeriveBurn?Math.max(0,overall-total):null,burnedMethod:canDeriveBurn?"最大供应与当前总供应差额":"官方未单列",
       stakingAmount,stakingApplicable:definition.stakingApplicable,stakingLabel:definition.stakingLabel,stakingExit:definition.stakingExit,
       businessLabel:definition.businessLabel,businessValue,valueCapture:definition.valueCapture,pressure:definition.pressure,risk:definition.risk,
-      chart:chartResult.status==="fulfilled"?chartResult.value:[],marketSource:`${marketsResult.value.length?"CoinGecko":"CoinPaprika 备用"} · Binance`,stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"待接 Plasma 官方验证者源",businessSource:"DefiLlama 协议 / 链 TVL",
+      chart:chartRows,marketSource:market?`${marketsResult.value.some(row=>row.id===definition.cgId)?"CoinGecko":"CoinPaprika 备用"} · Binance`:"Binance 日线推导",stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"待接 Plasma 官方验证者源",businessSource:"DefiLlama 协议 / 链 TVL",
       failedSources,updatedAt,
     };
   });

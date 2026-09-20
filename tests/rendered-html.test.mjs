@@ -83,6 +83,8 @@ test("keeps comparison home and all eight asset dashboards wired", async () => {
   assert.match(page, /<ExpandedAssetDashboard/);
   assert.match(page, /"uni","aave","ena","xpl"/);
   assert.match(compare, /八个资产统一使用 USD/);
+  assert.match(compare, /新增资产快捷入口/);
+  assert.match(compare, /数据源失败不影响资产继续显示/);
   assert.match(compare, /不适用/);
   assert.match(expanded, /流通 \/ 整体供应/);
   assert.match(expanded, /质押 \/ 整体供应/);
