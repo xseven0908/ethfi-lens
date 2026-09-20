@@ -21,21 +21,21 @@ test("server-renders the Token Lens production shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /<html lang="zh-CN">/i);
-  assert.match(html, /<title>Token Lens — ETHFI、BP、PENDLE 与 HYPE 对比看板<\/title>/i);
+  assert.match(html, /<title>Token Lens — 八资产统一指标对比看板<\/title>/i);
   assert.match(html, /TOKEN/);
   assert.match(html, /ETHFI/);
   assert.match(html, /Backpack/);
   assert.match(html, /PENDLE/);
   assert.match(html, /HYPE/);
-  assert.match(html, /四币对比/);
+  assert.match(html, /八币对比/);
   assert.match(html, /先看谁领先/);
   assert.match(html, /USD 统一口径/);
   assert.doesNotMatch(html, /CNY/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|Building your site/i);
 });
 
-test("keeps comparison home and all four asset dashboards wired", async () => {
-  const [page, compare, pendle, pendleApi, marketsApi, hype, hypeApi, layout, packageJson] = await Promise.all([
+test("keeps comparison home and all eight asset dashboards wired", async () => {
+  const [page, compare, pendle, pendleApi, marketsApi, hype, hypeApi, expanded, expandedApi, model, layout, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/compare-dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/pendle-dashboard.tsx", import.meta.url), "utf8"),
@@ -43,10 +43,13 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
     readFile(new URL("../app/api/pendle-markets/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/hype-dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/hype/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/expanded-asset-dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/expanded-assets/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
-  assert.match(page, /type AssetView = "compare" \| "ethfi" \| "bp" \| "pendle" \| "hype"/);
+  assert.match(page, /type AssetView = "compare" \| TokenId/);
   assert.match(page, /<CompareDashboard/);
   assert.match(compare, /核心指标矩阵/);
   assert.match(compare, /整体供应基准/);
@@ -77,7 +80,18 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
   assert.match(hypeApi, /tickers\/hype-hyperliquid/);
   assert.match(hypeApi, /VERIFIED_CIRCULATING_SUPPLY/);
   assert.match(hypeApi, /protocol:perps\?/);
-  assert.match(layout, /og-brand-v5\.png/);
+  assert.match(page, /<ExpandedAssetDashboard/);
+  assert.match(page, /"uni","aave","ena","xpl"/);
+  assert.match(compare, /八个资产统一使用 USD/);
+  assert.match(compare, /不适用/);
+  assert.match(expanded, /流通 \/ 整体供应/);
+  assert.match(expanded, /质押 \/ 整体供应/);
+  assert.match(expandedApi, /uniswap,aave,ethena,plasma|definitions\.map/);
+  assert.match(expandedApi, /STKAAVE/);
+  assert.match(expandedApi, /SENA/);
+  assert.match(expandedApi, /api\.llama\.fi/);
+  assert.match(model, /ExpandedTokenId="uni"\|"aave"\|"ena"\|"xpl"/);
+  assert.match(layout, /og-brand-v6\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview", root)));
 });
