@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { ExpandedAssetSnapshot,ExpandedTokenId } from "../../asset-model";
 
 type MarketRow={id:string;current_price?:number;price_change_percentage_24h?:number;market_cap?:number;fully_diluted_valuation?:number;total_volume?:number;circulating_supply?:number;total_supply?:number;max_supply?:number|null};
+type ExchangeQuote={id:ExpandedTokenId;price:number;change24h:number;volume24h:number;source:string};
 type Definition={id:ExpandedTokenId;cgId:string;paprikaId:string;symbol:string;name:string;project:string;category:string;color:string;verified:{circulating:number;total:number;overall:number};stakingApplicable:boolean;stakingLabel:string;stakingExit:string;businessLabel:string;valueCapture:string;pressure:string;risk:string};
 
 const definitions:Definition[]=[
@@ -33,9 +34,30 @@ async function paprikaRows(){
   return results.flatMap(result=>{if(result.status!=="fulfilled")return[];const {definition,payload}=result.value,quote=payload?.quotes?.USD??{},price=Number(quote.price)||0;return [{id:definition.cgId,current_price:price,price_change_percentage_24h:Number(quote.percent_change_24h)||0,market_cap:definition.verified.circulating*price,fully_diluted_valuation:definition.verified.overall*price,total_volume:Number(quote.volume_24h)||0,circulating_supply:definition.verified.circulating,total_supply:Number(payload?.total_supply)||definition.verified.total,max_supply:Number(payload?.max_supply)||definition.verified.overall} as MarketRow]});
 }
 
-async function chart(symbol:string){
-  const rows=await json(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=90`);
-  return (rows as unknown[][]).map(row=>[Number(row[0]),Number(row[4])] as [number,number]).filter(row=>row[0]>0&&row[1]>0);
+const median=(values:number[])=>{const rows=values.filter(Number.isFinite).sort((a,b)=>a-b),mid=Math.floor(rows.length/2);return rows.length%2?rows[mid]:(rows[mid-1]+rows[mid])/2};
+
+async function exchangeQuote(definition:Definition):Promise<ExchangeQuote>{
+  const instId=definition.symbol.replace(/USDT$/,"-USDT");
+  const [okxResult,bybitResult]=await Promise.allSettled([
+    json(`https://www.okx.com/api/v5/market/ticker?instId=${instId}`),
+    json(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${definition.symbol}`),
+  ]);
+  const quotes:Array<{price:number;change:number;volume:number;source:string}>=[];
+  if(okxResult.status==="fulfilled"){const ticker=okxResult.value?.data?.[0],price=Number(ticker?.last),open=Number(ticker?.open24h);if(price>0)quotes.push({price,change:open>0?(price/open-1)*100:0,volume:Number(ticker?.volCcy24h)||0,source:"OKX"})}
+  if(bybitResult.status==="fulfilled"){const ticker=bybitResult.value?.result?.list?.[0],price=Number(ticker?.lastPrice);if(price>0)quotes.push({price,change:Number(ticker?.price24hPcnt)*100||0,volume:Number(ticker?.turnover24h)||0,source:"Bybit"})}
+  if(!quotes.length)throw new Error(`${definition.name} exchange quote unavailable`);
+  return {id:definition.id,price:median(quotes.map(item=>item.price)),change24h:median(quotes.map(item=>item.change)),volume24h:quotes.reduce((sum,item)=>sum+item.volume,0),source:quotes.map(item=>item.source).join(" · ")};
+}
+
+async function chart(definition:Definition){
+  try{
+    const rows=await json(`https://api.binance.com/api/v3/klines?symbol=${definition.symbol}&interval=1d&limit=90`);
+    return {rows:(rows as unknown[][]).map(row=>[Number(row[0]),Number(row[4])] as [number,number]).filter(row=>row[0]>0&&row[1]>0),source:"Binance"};
+  }catch{
+    const instId=definition.symbol.replace(/USDT$/,"-USDT"),payload=await json(`https://www.okx.com/api/v5/market/history-candles?instId=${instId}&bar=1Dutc&limit=90`),rows=(payload?.data??[]).map((row:string[])=>[Number(row[0]),Number(row[4])] as [number,number]).filter((row:[number,number])=>row[0]>0&&row[1]>0).sort((a:[number,number],b:[number,number])=>a[0]-b[0]);
+    if(rows.length<2)throw new Error(`${definition.name} chart unavailable`);
+    return {rows,source:"OKX"};
+  }
 }
 
 async function ethCall(to:string,data:string){
@@ -68,31 +90,33 @@ async function protocolMetrics(){
 }
 
 export async function GET(){
-  const [marketsResult,paprikaResult,chartsResult,aaveStakeResult,enaStakeResult,businessResult]=await Promise.all([
+  const [marketsResult,paprikaResult,exchangeResult,chartsResult,aaveStakeResult,enaStakeResult,businessResult]=await Promise.all([
     marketRows().then(value=>({value,error:false as const})).catch(()=>({value:[] as MarketRow[],error:true as const})),
     paprikaRows().then(value=>({value,error:false as const})).catch(()=>({value:[] as MarketRow[],error:true as const})),
-    Promise.allSettled(definitions.map(item=>chart(item.symbol))),
+    Promise.allSettled(definitions.map(exchangeQuote)),
+    Promise.allSettled(definitions.map(chart)),
     totalSupply(STKAAVE).then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
     balanceOf(ENA,SENA).then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
     protocolMetrics().then(value=>({value,error:false as const})).catch(()=>({value:{uni:null,aave:null,ena:null,xpl:null} as Record<ExpandedTokenId,number|null>,error:true as const})),
   ]);
   const marketMap=new Map(paprikaResult.value.map(row=>[row.id,row]));for(const row of marketsResult.value)marketMap.set(row.id,row);
+  const exchangeMap=new Map(exchangeResult.flatMap(result=>result.status==="fulfilled"?[[result.value.id,result.value] as const]:[]));
   const updatedAt=new Date().toISOString();
   const assets:ExpandedAssetSnapshot[]=definitions.map((definition,index)=>{
-    const market=marketMap.get(definition.cgId),total=Number(market?.total_supply)||definition.verified.total,overall=Number(market?.max_supply)||definition.verified.overall,circulating=Number(market?.circulating_supply)||definition.verified.circulating;
-    const chartResult=chartsResult[index],chartRows=chartResult.status==="fulfilled"?chartResult.value:[],lastPrice=chartRows.at(-1)?.[1]??null,price=Number(market?.current_price)||lastPrice;
+    const market=marketMap.get(definition.cgId),exchange=exchangeMap.get(definition.id),total=Number(market?.total_supply)||definition.verified.total,overall=Number(market?.max_supply)||definition.verified.overall,circulating=Number(market?.circulating_supply)||definition.verified.circulating;
+    const chartResult=chartsResult[index],chartRows=chartResult.status==="fulfilled"?chartResult.value.rows:[],chartSource=chartResult.status==="fulfilled"?chartResult.value.source:null,lastPrice=chartRows.at(-1)?.[1]??null,price=exchange?.price||Number(market?.current_price)||lastPrice;
     const stakingAmount=definition.id==="aave"?aaveStakeResult.value:definition.id==="ena"?enaStakeResult.value:null;
     const businessValue=businessResult.value[definition.id];
     const canDeriveBurn=definition.id==="uni"&&overall!=null&&total!=null&&overall>=total;
-    const failedSources=[!market&&"聚合行情",chartResult.status!=="fulfilled"&&"Binance 日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="xpl"&&"Plasma 验证者聚合",businessValue==null&&"协议规模"].filter(Boolean) as string[];
+    const failedSources=[!exchange&&!market&&"实时行情",chartResult.status!=="fulfilled"&&"交易所日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="xpl"&&"Plasma 验证者聚合",businessValue==null&&"协议规模"].filter(Boolean) as string[];
     return {
       id:definition.id,name:definition.name,project:definition.project,category:definition.category,color:definition.color,
-      price,change24h:Number.isFinite(Number(market?.price_change_percentage_24h))?Number(market?.price_change_percentage_24h):chartRows.length>1?(chartRows.at(-1)![1]/chartRows.at(-2)![1]-1)*100:null,
-      marketCap:Number(market?.market_cap)||(price?price*circulating:null),fdv:Number(market?.fully_diluted_valuation)||(price?price*overall:null),volume24h:Number(market?.total_volume)||null,
+      price,change24h:exchange?.change24h??(Number.isFinite(Number(market?.price_change_percentage_24h))?Number(market?.price_change_percentage_24h):chartRows.length>1?(chartRows.at(-1)![1]/chartRows.at(-2)![1]-1)*100:null),
+      marketCap:price?price*circulating:Number(market?.market_cap)||null,fdv:price?price*overall:Number(market?.fully_diluted_valuation)||null,volume24h:exchange?.volume24h||Number(market?.total_volume)||null,
       circulatingSupply:circulating,totalSupply:total,overallSupply:overall,burnedSupply:canDeriveBurn?Math.max(0,overall-total):null,burnedMethod:canDeriveBurn?"最大供应与当前总供应差额":"官方未单列",
       stakingAmount,stakingApplicable:definition.stakingApplicable,stakingLabel:definition.stakingLabel,stakingExit:definition.stakingExit,
       businessLabel:definition.businessLabel,businessValue,valueCapture:definition.valueCapture,pressure:definition.pressure,risk:definition.risk,
-      chart:chartRows,marketSource:market?`${marketsResult.value.some(row=>row.id===definition.cgId)?"CoinGecko":"CoinPaprika 备用"} · Binance`:"Binance 日线推导",stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"待接 Plasma 官方验证者源",businessSource:"DefiLlama 协议 / 链 TVL",
+      chart:chartRows,marketSource:exchange?`${exchange.source} · ${chartSource??"日线暂不可读"}`:market?`${marketsResult.value.some(row=>row.id===definition.cgId)?"CoinGecko":"CoinPaprika 备用"} · ${chartSource??"日线暂不可读"}`:`${chartSource??"行情暂不可读"} 日线推导`,stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"待接 Plasma 官方验证者源",businessSource:"DefiLlama 协议 / 链 TVL",
       failedSources,updatedAt,
     };
   });

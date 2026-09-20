@@ -92,6 +92,9 @@ test("keeps comparison home and all eight asset dashboards wired", async () => {
   assert.match(expandedApi, /STKAAVE/);
   assert.match(expandedApi, /SENA/);
   assert.match(expandedApi, /api\.llama\.fi/);
+  assert.match(expandedApi, /www\.okx\.com\/api\/v5\/market\/ticker/);
+  assert.match(expandedApi, /api\.bybit\.com\/v5\/market\/tickers/);
+  assert.match(expandedApi, /history-candles/);
   assert.match(model, /ExpandedTokenId="uni"\|"aave"\|"ena"\|"xpl"/);
   assert.match(layout, /og-brand-v6\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
