@@ -49,6 +49,10 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
   assert.match(page, /type AssetView = "compare" \| "ethfi" \| "bp" \| "pendle" \| "hype"/);
   assert.match(page, /<CompareDashboard/);
   assert.match(compare, /核心指标矩阵/);
+  assert.match(compare, /整体供应基准/);
+  assert.match(compare, /当前总供应/);
+  assert.match(compare, /已销毁 \/ 永久移除/);
+  assert.match(compare, /质押 \/ 整体供应/);
   assert.match(compare, /30D 相对价格走势/);
   assert.match(compare, /CompareTrendChart/);
   assert.match(compare, /优势地图/);
@@ -68,6 +72,8 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
   assert.match(hype, /质押与验证者/);
   assert.match(hypeApi, /metaAndAssetCtxs/);
   assert.match(hypeApi, /validatorSummaries/);
+  assert.match(hypeApi, /tokenDetails/);
+  assert.match(hypeApi, /burnedSupply/);
   assert.match(hypeApi, /tickers\/hype-hyperliquid/);
   assert.match(hypeApi, /VERIFIED_CIRCULATING_SUPPLY/);
   assert.match(hypeApi, /protocol:perps\?/);
