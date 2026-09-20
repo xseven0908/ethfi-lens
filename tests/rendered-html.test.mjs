@@ -59,12 +59,18 @@ test("keeps comparison home and all four asset dashboards wired", async () => {
   assert.match(pendle, /sPENDLE 与协议收入/);
   assert.match(pendle, /头部活跃收益市场/);
   assert.match(pendleApi, /\/v1\/spendle\/data/);
+  assert.match(pendleApi, /tickers\/pendle-pendle/);
+  assert.match(pendleApi, /VERIFIED_CIRCULATING_SUPPLY/);
+  assert.match(pendleApi, /supplySource/);
   assert.match(marketsApi, /\/v2\/markets\/all/);
   assert.match(page, /<HypeDashboard/);
   assert.match(hype, /交易业务快照/);
   assert.match(hype, /质押与验证者/);
   assert.match(hypeApi, /metaAndAssetCtxs/);
   assert.match(hypeApi, /validatorSummaries/);
+  assert.match(hypeApi, /tickers\/hype-hyperliquid/);
+  assert.match(hypeApi, /VERIFIED_CIRCULATING_SUPPLY/);
+  assert.match(hypeApi, /protocol:perps\?/);
   assert.match(layout, /og-brand-v5\.png/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("app/_sites-preview", root)));

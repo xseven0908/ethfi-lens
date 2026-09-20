@@ -4,6 +4,9 @@ type Venue={name:string;price:number;change24h:number;volume24h:number;high24h:n
 type Validator={validator:string;name:string;stake:number;commission:number;isActive:boolean;isJailed:boolean;apr:number;uptime:number};
 
 const ASSISTANCE_FUND="0xfefefefefefefefefefefefefefefefefefefefe";
+const VERIFIED_CIRCULATING_SUPPLY=222_445_714;
+const VERIFIED_TOTAL_SUPPLY=955_307_079;
+const MAX_SUPPLY=1_000_000_000;
 const median=(values:number[])=>{const rows=[...values].sort((a,b)=>a-b),mid=Math.floor(rows.length/2);return rows.length%2?rows[mid]:(rows[mid-1]+rows[mid])/2};
 
 async function json(url:string,options:RequestInit={},timeout=8000){
@@ -37,14 +40,16 @@ export async function GET(request:NextRequest){
   const validators:Validator[]=rawValidators.map(x=>{const stats=Array.isArray(x.stats)?x.stats as Array<[string,{predictedApr?:string;uptimeFraction?:string}]>:[],day=stats.find(row=>row[0]==="day")?.[1];return{validator:String(x.validator??""),name:String(x.name??"Unnamed"),stake:Number(x.stake??0)/1e8,commission:Number(x.commission??0),isActive:Boolean(x.isActive),isJailed:Boolean(x.isJailed),apr:Number(day?.predictedApr??0),uptime:Number(day?.uptimeFraction??0)}}).sort((a,b)=>b.stake-a.stake);
   const activeValidators=validators.filter(x=>x.isActive&&!x.isJailed),totalStaked=activeValidators.reduce((sum,x)=>sum+x.stake,0),weightedApr=totalStaked?activeValidators.reduce((sum,x)=>sum+x.apr*x.stake,0)/totalStaked:0,top5Stake=activeValidators.slice(0,5).reduce((sum,x)=>sum+x.stake,0);
   const fund=fundResult.status==="fulfilled"?fundResult.value:null,fundHype=Number(fund?.balances?.find((x:{coin?:string})=>x.coin==="HYPE")?.total??0);
-  const paprikaPrice=Number(paprika?.quotes?.USD?.price??0),paprikaMarketCap=Number(paprika?.quotes?.USD?.market_cap??0),circulatingSupply=Number(cg?.circulating_supply)||(paprikaPrice>0?paprikaMarketCap/paprikaPrice:0),totalSupply=Number(cg?.total_supply)||Number(paprika?.total_supply??0),maxSupply=Number(cg?.max_supply)||Number(paprika?.max_supply??1_000_000_000),marketCapUsd=Number(cg?.market_cap)||paprikaMarketCap||(circulatingSupply*priceUsd),fdvUsd=Number(cg?.fully_diluted_valuation)||(maxSupply*priceUsd),rawChart=chartResult.status==="fulfilled"?chartResult.value:okxChartResult.status==="fulfilled"?okxChartResult.value:[],chartSource=chartResult.status==="fulfilled"?"Binance":"OKX";
+  const paprikaPrice=Number(paprika?.quotes?.USD?.price??0),paprikaMarketCap=Number(paprika?.quotes?.USD?.market_cap??0),paprikaCirculating=paprikaPrice>0&&paprikaMarketCap>0?paprikaMarketCap/paprikaPrice:0;
+  const circulatingSupply=Number(cg?.circulating_supply)||paprikaCirculating||VERIFIED_CIRCULATING_SUPPLY,totalSupply=Number(cg?.total_supply)||Number(paprika?.total_supply)||VERIFIED_TOTAL_SUPPLY,maxSupply=Number(cg?.max_supply)||Number(paprika?.max_supply)||MAX_SUPPLY;
+  const marketCapUsd=circulatingSupply*priceUsd,fdvUsd=maxSupply*priceUsd,rawChart=chartResult.status==="fulfilled"?chartResult.value:okxChartResult.status==="fulfilled"?okxChartResult.value:[],chartSource=chartResult.status==="fulfilled"?"Binance":"OKX",supplySource=cg?"CoinGecko":paprika?"CoinPaprika":"最近校验供应量";
   const failedSources=[!cg&&!paprika&&"市场供应",rawChart.length<2&&"交易所K线",!perps&&"Hyperliquid永续",!spot&&"Hyperliquid现货",!validators.length&&"Hyperliquid验证者",!fund&&"Assistance Fund"].filter(Boolean);
   return NextResponse.json({
     price:priceUsd*rate,change24h:median(venues.map(x=>x.change24h)),marketCap:marketCapUsd*rate,fdv:fdvUsd*rate,volume24h:venues.reduce((sum,x)=>sum+x.volume24h,0)*rate,circulatingSupply,totalSupply,maxSupply,
     chart:rawChart.map(([time,value]:[number,number])=>[time,value*rate]),chartSource,marketSource:venues.map(x=>x.name).join(" · "),venues:venues.map(x=>({...x,price:x.price*rate,volume24h:x.volume24h*rate,high24h:x.high24h*rate,low24h:x.low24h*rate})),
-    protocol:perps&&spot?{perpsVolume24h:perpsVolume*rate,spotVolume24h:spotVolume*rate,openInterest:openInterest*rate,perpMarkets:perpMeta.length,source:"Hyperliquid Info API"}:null,
+    protocol:perps?{perpsVolume24h:perpsVolume*rate,spotVolume24h:spot?spotVolume*rate:null,openInterest:openInterest*rate,perpMarkets:perpMeta.length,source:"Hyperliquid Info API"}:null,
     staking:validators.length?{totalStaked,stakingRatio:maxSupply?totalStaked/maxSupply:0,activeValidators:activeValidators.length,totalValidators:validators.length,weightedApr,top5Share:totalStaked?top5Stake/totalStaked:0,validators:activeValidators.slice(0,8),delegationLockDays:1,withdrawalDays:7,source:"Hyperliquid validatorSummaries"}:null,
     assistanceFund:fund?{hype:fundHype,address:ASSISTANCE_FUND,source:"Hyperliquid spotClearinghouseState"}:null,
-    currencyRate:rate,fxSource:currency==="cny"?fxData.source:"USD",failedSources,stale:(currency==="cny"&&fxData.stale)||failedSources.length>0,updatedAt:new Date().toISOString()
+    currencyRate:rate,supplySource,fxSource:currency==="cny"?fxData.source:"USD",failedSources,stale:(currency==="cny"&&fxData.stale)||failedSources.length>0,updatedAt:new Date().toISOString()
   },{headers:{"Cache-Control":"public, max-age=15, s-maxage=30, stale-while-revalidate=90"}});
 }
