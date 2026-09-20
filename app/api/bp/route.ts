@@ -53,7 +53,7 @@ export async function GET(request:NextRequest){
   return NextResponse.json({
     price:priceUsd*rate,change24h,high24h:Number(ticker?.high??cg?.high_24h??priceUsd)*rate,low24h:Number(ticker?.low??cg?.low_24h??priceUsd)*rate,
     marketCap:priceUsd*circulatingSupply*rate,fdv:priceUsd*ECONOMIC_MAX_SUPPLY*rate,venueVolume24h:venueVolume*rate,allMarketVolume24h:allMarketVolume*rate,trades24h:Number(ticker?.trades??0),
-    circulatingSupply,totalSupply,economicMaxSupply:ECONOMIC_MAX_SUPPLY,staked,stakedPercent:staked==null?null:staked/circulatingSupply*100,unstakedCirculating:staked==null?null:Math.max(0,circulatingSupply-staked),cooldownDays:7,pendingUnstake:null,pendingUnstakePublic:false,
+    circulatingSupply,totalSupply,economicMaxSupply:ECONOMIC_MAX_SUPPLY,staked,stakedPercent:staked==null?null:staked/ECONOMIC_MAX_SUPPLY*100,unstakedCirculating:staked==null?null:Math.max(0,circulatingSupply-staked),cooldownDays:7,pendingUnstake:null,pendingUnstakePublic:false,
     chart,chartSource:"Backpack BP_USDC 日线",marketSource:cg?"Backpack + CoinGecko":"Backpack",circulatingSource:cg?"CoinGecko 市场口径":"Backpack TGE 公开口径",
     liquidity:{bestBid:bestBid?bestBid*rate:null,bestAsk:Number.isFinite(bestAsk)?bestAsk*rate:null,spreadBps,bidDepth1Pct:bidDepth*rate,askDepth1Pct:askDepth*rate,available:bids.length>0&&asks.length>0},
     chain:chain?{...chain,supplyDelta:ECONOMIC_MAX_SUPPLY-chain.supply,mintAuthorityEnabled:!!chain.mintAuthority,freezeAuthorityEnabled:!!chain.freezeAuthority}:null,
