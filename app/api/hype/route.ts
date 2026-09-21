@@ -31,11 +31,16 @@ async function okxChart(){const rows=(await json("https://www.okx.com/api/v5/mar
 async function coinGecko(){const headers:Record<string,string>={accept:"application/json"};if(process.env.COINGECKO_API_KEY)headers["x-cg-demo-api-key"]=process.env.COINGECKO_API_KEY;return (await json("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=hyperliquid&price_change_percentage=24h",{headers}))?.[0]??null}
 async function coinPaprika(){return json("https://api.coinpaprika.com/v1/tickers/hype-hyperliquid",{},7000)}
 async function fx(){try{const rate=Number((await json("https://api.coinbase.com/v2/exchange-rates?currency=USD",{},4500)).data?.rates?.CNY);if(rate>0)return{rate,source:"Coinbase FX",stale:false}}catch{}return{rate:7.17,source:"汇率备用值",stale:true}}
+async function assistanceFundBuys(){
+  const now=Date.now(),start90=now-90*86_400_000,rows=await info({type:"userFillsByTime",user:ASSISTANCE_FUND,startTime:start90,endTime:now,aggregateByTime:true}) as Array<{coin?:string;side?:string;sz?:string;time?:number}>;
+  const buys=Array.isArray(rows)?rows.filter(row=>row.side==="B"&&(row.coin==="@107"||row.coin==="HYPE/USDC"||row.coin==="HYPE")):[];
+  return {bought30d:buys.filter(row=>Number(row.time)>=now-30*86_400_000).reduce((sum,row)=>sum+Number(row.sz??0),0),bought90d:buys.reduce((sum,row)=>sum+Number(row.sz??0),0),fills:buys.length};
+}
 
 export async function GET(request:NextRequest){
   const currency=request.nextUrl.searchParams.get("currency")==="cny"?"cny":"usd";
-  const results=await Promise.allSettled([binance(),okx(),bybit(),chart(),okxChart(),coinGecko(),coinPaprika(),officialSupply(),fx(),info({type:"metaAndAssetCtxs"}),info({type:"spotMetaAndAssetCtxs"}),info({type:"validatorSummaries"}),info({type:"spotClearinghouseState",user:ASSISTANCE_FUND})]);
-  const [binanceResult,okxResult,bybitResult,chartResult,okxChartResult,cgResult,paprikaResult,supplyResult,fxResult,perpsResult,spotResult,validatorsResult,fundResult]=results;
+  const results=await Promise.allSettled([binance(),okx(),bybit(),chart(),okxChart(),coinGecko(),coinPaprika(),officialSupply(),fx(),info({type:"metaAndAssetCtxs"}),info({type:"spotMetaAndAssetCtxs"}),info({type:"validatorSummaries"}),info({type:"spotClearinghouseState",user:ASSISTANCE_FUND}),assistanceFundBuys()]);
+  const [binanceResult,okxResult,bybitResult,chartResult,okxChartResult,cgResult,paprikaResult,supplyResult,fxResult,perpsResult,spotResult,validatorsResult,fundResult,fundBuysResult]=results;
   const venues:Venue[]=[];for(const result of [binanceResult,okxResult,bybitResult])if(result.status==="fulfilled")venues.push(result.value as Venue);
   const cg=cgResult.status==="fulfilled"?cgResult.value:null,paprika=paprikaResult.status==="fulfilled"?paprikaResult.value:null;
   if(!venues.length&&cg)venues.push({name:"CoinGecko",price:Number(cg.current_price),change24h:Number(cg.price_change_percentage_24h??0),volume24h:Number(cg.total_volume??0),high24h:Number(cg.high_24h??cg.current_price),low24h:Number(cg.low_24h??cg.current_price)});
@@ -51,13 +56,14 @@ export async function GET(request:NextRequest){
   const official=supplyResult.status==="fulfilled"?supplyResult.value:null,paprikaPrice=Number(paprika?.quotes?.USD?.price??0),paprikaMarketCap=Number(paprika?.quotes?.USD?.market_cap??0),paprikaCirculating=paprikaPrice>0&&paprikaMarketCap>0?paprikaMarketCap/paprikaPrice:0;
   const circulatingSupply=official?.circulatingSupply||Number(cg?.circulating_supply)||paprikaCirculating||VERIFIED_CIRCULATING_SUPPLY,totalSupply=official?.totalSupply||Number(cg?.total_supply)||Number(paprika?.total_supply)||VERIFIED_TOTAL_SUPPLY,maxSupply=official?.maxSupply||Number(cg?.max_supply)||Number(paprika?.max_supply)||MAX_SUPPLY;
   const burnedSupply=official?Math.max(0,maxSupply-totalSupply):null,marketCapUsd=circulatingSupply*priceUsd,fdvUsd=maxSupply*priceUsd,rawChart=chartResult.status==="fulfilled"?chartResult.value:okxChartResult.status==="fulfilled"?okxChartResult.value:[],chartSource=chartResult.status==="fulfilled"?"Binance":"OKX",supplySource=official?"Hyperliquid tokenDetails":cg?"CoinGecko":paprika?"CoinPaprika":"最近校验供应量";
-  const failedSources=[!official&&!cg&&!paprika&&"市场供应",rawChart.length<2&&"交易所K线",!perps&&"Hyperliquid永续",!spot&&"Hyperliquid现货",!validators.length&&"Hyperliquid验证者",!fund&&"Assistance Fund"].filter(Boolean);
+  const fundBuys=fundBuysResult.status==="fulfilled"?fundBuysResult.value:null;
+  const failedSources=[!official&&!cg&&!paprika&&"市场供应",rawChart.length<2&&"交易所K线",!perps&&"Hyperliquid永续",!spot&&"Hyperliquid现货",!validators.length&&"Hyperliquid验证者",!fund&&"Assistance Fund",!fundBuys&&"Assistance Fund 90D 成交"].filter(Boolean);
   return NextResponse.json({
     price:priceUsd*rate,change24h:median(venues.map(x=>x.change24h)),marketCap:marketCapUsd*rate,fdv:fdvUsd*rate,volume24h:venues.reduce((sum,x)=>sum+x.volume24h,0)*rate,circulatingSupply,totalSupply,maxSupply,burnedSupply,
     chart:rawChart.map(([time,value]:[number,number])=>[time,value*rate]),chartSource,marketSource:venues.map(x=>x.name).join(" · "),venues:venues.map(x=>({...x,price:x.price*rate,volume24h:x.volume24h*rate,high24h:x.high24h*rate,low24h:x.low24h*rate})),
     protocol:perps?{perpsVolume24h:perpsVolume*rate,spotVolume24h:spot?spotVolume*rate:null,openInterest:openInterest*rate,perpMarkets:perpMeta.length,source:"Hyperliquid Info API"}:null,
     staking:validators.length?{totalStaked,stakingRatio:maxSupply?totalStaked/maxSupply:0,activeValidators:activeValidators.length,totalValidators:validators.length,weightedApr,top5Share:totalStaked?top5Stake/totalStaked:0,validators:activeValidators.slice(0,8),delegationLockDays:1,withdrawalDays:7,source:"Hyperliquid validatorSummaries"}:null,
-    assistanceFund:fund?{hype:fundHype,address:ASSISTANCE_FUND,source:"Hyperliquid spotClearinghouseState"}:null,
+    assistanceFund:fund?{hype:fundHype,bought30d:fundBuys?.bought30d??null,bought90d:fundBuys?.bought90d??null,buyFills90d:fundBuys?.fills??null,address:ASSISTANCE_FUND,source:fundBuys?"Hyperliquid spotClearinghouseState + userFillsByTime":"Hyperliquid spotClearinghouseState"}:null,
     currencyRate:rate,supplySource,fxSource:currency==="cny"?fxData.source:"USD",failedSources,stale:(currency==="cny"&&fxData.stale)||failedSources.length>0,updatedAt:new Date().toISOString()
   },{headers:{"Cache-Control":"public, max-age=15, s-maxage=30, stale-while-revalidate=90"}});
 }

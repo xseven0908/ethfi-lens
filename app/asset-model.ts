@@ -18,6 +18,11 @@ export type ExpandedAssetSnapshot={
   overallSupply:number|null;
   burnedSupply:number|null;
   burnedMethod:string;
+  burn30d?:number|null;
+  burn90d?:number|null;
+  burnPeriodSource?:string;
+  unlockEvents?:Array<{date:string;amount:number;label:string;beneficiary:string;source:string}>;
+  buybackStatus?:string;
   stakingAmount:number|null;
   stakingApplicable:boolean;
   stakingLabel:string;

@@ -8,12 +8,13 @@ type Definition={id:ExpandedTokenId;cgId:string;paprikaId:string;symbol:string;n
 const definitions:Definition[]=[
   {id:"uni",cgId:"uniswap",paprikaId:"uni-uniswap",symbol:"UNIUSDT",name:"UNI",project:"Uniswap",category:"DEX 治理 / 协议费用",color:"#ff4d9d",verified:{circulating:620_930_423,total:888_178_419,overall:1_000_000_000},stakingApplicable:false,stakingLabel:"无原生代币质押",stakingExit:"不适用",businessLabel:"Uniswap 协议 TVL",valueCapture:"协议费用用于 UNI 销毁；治理委托不计作质押",pressure:"治理可按规则增发，需同时观察销毁与供应变化",risk:"协议使用量与 UNI 价值回流并非固定比例"},
   {id:"aave",cgId:"aave",paprikaId:"aave-new",symbol:"AAVEUSDT",name:"AAVE",project:"Aave",category:"借贷协议 / 治理与安全",color:"#7b61ff",verified:{circulating:15_428_081,total:16_000_000,overall:16_000_000},stakingApplicable:true,stakingLabel:"stkAAVE 锁定量",stakingExit:"Safety Module 冷却机制",businessLabel:"Aave 协议 TVL",valueCapture:"AAVE 回购自 2026-04-19 暂停；与 stkAAVE 分开观察",pressure:"Umbrella 的 aToken / GHO 保障不计入 AAVE 质押",risk:"回购状态受 DAO 治理与资产负债表安排影响"},
-  {id:"ena",cgId:"ethena",paprikaId:"ena-ethena",symbol:"ENAUSDT",name:"ENA",project:"Ethena",category:"合成美元协议治理",color:"#24262b",verified:{circulating:10_095_312_500,total:15_000_000_000,overall:15_000_000_000},stakingApplicable:true,stakingLabel:"sENA 合约锁定 ENA",stakingExit:"解除后 7 天冷却",businessLabel:"Ethena 协议 TVL",valueCapture:"sENA 分配属酌情机制，不把 sUSDe 收益计入 ENA",pressure:"未流通供应与生态激励仍需持续观察",risk:"USDe 业务规模不能直接等同于 ENA 持有人收益"},
-  {id:"xpl",cgId:"plasma",paprikaId:"xpl-plasma",symbol:"XPLUSDT",name:"XPL",project:"Plasma",category:"支付链 / 原生 Gas 与验证",color:"#17b890",verified:{circulating:2_777_777_778,total:10_000_000_000,overall:10_000_000_000},stakingApplicable:true,stakingLabel:"验证者质押",stakingExit:"官方聚合退出数据暂未接通",businessLabel:"Plasma 链 TVL",valueCapture:"XPL 基础费永久销毁；实时累计量待接入",pressure:"2026-09-25 团队与投资人首个悬崖解锁约 16.67 亿 XPL",risk:"近期大额解锁与后续验证者排放需优先观察"},
+  {id:"ena",cgId:"ethena",paprikaId:"ena-ethena",symbol:"ENAUSDT",name:"ENA",project:"Ethena",category:"合成美元协议治理",color:"#24262b",verified:{circulating:10_095_312_500,total:15_000_000_000,overall:15_000_000_000},stakingApplicable:true,stakingLabel:"sENA 合约锁定 ENA",stakingExit:"解除后 7 天冷却",businessLabel:"Ethena 协议 TVL",valueCapture:"费率开关投票已通过；达到 USDe 供应门槛后启动 ENA 回购",pressure:"团队与投资人已知部分按月归属；生态与 Foundation 另行披露",risk:"回购尚受 USDe 供应门槛约束，不能把协议收入直接计作已回购"},
+  {id:"xpl",cgId:"plasma",paprikaId:"xpl-plasma",symbol:"XPLUSDT",name:"XPL",project:"Plasma",category:"支付链 / 原生 Gas 与验证",color:"#17b890",verified:{circulating:2_777_777_778,total:10_000_000_000,overall:10_000_000_000},stakingApplicable:false,stakingLabel:"外部验证者与委托尚未上线",stakingExit:"尚未启用",businessLabel:"Plasma 链 TVL",valueCapture:"XPL 基础费永久销毁；实时累计量待官方聚合",pressure:"2026-09-25 团队、投资人与生态合计约 17.56 亿 XPL",risk:"外部验证者和委托上线前不会启动验证者通胀"},
 ];
 
 const ETH_RPCS=["https://ethereum-rpc.publicnode.com","https://eth.drpc.org","https://eth.llamarpc.com"];
 const STKAAVE="0x4da27a545c0c5b758a6ba100e3a049001de870f5";
+const UNI="0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984";
 const ENA="0x57e114b691db790c35207b2e685d4a43181e6061";
 const SENA="0x8be3460a480c80728a8c4d7a5d5303c85ba7b3b9";
 
@@ -60,11 +61,11 @@ async function chart(definition:Definition){
   }
 }
 
-async function ethCall(to:string,data:string){
+async function ethCall(to:string,data:string,blockTag="latest"){
   let last:unknown;
   for(const rpc of ETH_RPCS){
     try{
-      const result=await json(rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_call",params:[{to,data},"latest"]})},6500) as {result?:string;error?:{message?:string}};
+      const result=await json(rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_call",params:[{to,data},blockTag]})},6500) as {result?:string;error?:{message?:string}};
       if(result.error||!result.result||result.result==="0x")throw new Error(result.error?.message||"empty eth_call");
       return Number(BigInt(result.result))/1e18;
     }catch(error){last=error}
@@ -74,6 +75,26 @@ async function ethCall(to:string,data:string){
 
 const balanceOf=(token:string,account:string)=>ethCall(token,`0x70a08231${account.toLowerCase().replace(/^0x/,"").padStart(64,"0")}`);
 const totalSupply=(token:string)=>ethCall(token,"0x18160ddd");
+
+async function ethereumBlockNumber(){
+  let last:unknown;
+  for(const rpc of ETH_RPCS){
+    try{const payload=await json(rpc,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_blockNumber",params:[]})},6500) as {result?:string};if(!payload.result)throw new Error("empty block");return Number.parseInt(payload.result,16)}catch(error){last=error}
+  }
+  throw last instanceof Error?last:new Error("Ethereum block unavailable");
+}
+
+async function uniBurnPeriods(){
+  const currentBlock=await ethereumBlockNumber(),blocksPerDay=7_200;
+  const [current,days30,days90]=await Promise.all([
+    ethCall(UNI,"0x18160ddd"),
+    ethCall(UNI,"0x18160ddd",`0x${Math.max(1,currentBlock-30*blocksPerDay).toString(16)}`),
+    ethCall(UNI,"0x18160ddd",`0x${Math.max(1,currentBlock-90*blocksPerDay).toString(16)}`),
+  ]);
+  return {current,burn30d:Math.max(0,days30-current),burn90d:Math.max(0,days90-current)};
+}
+
+function nextMonthlyDate(day:number){const now=new Date(),year=now.getUTCFullYear(),month=now.getUTCMonth();for(let offset=0;offset<3;offset++){const date=new Date(Date.UTC(year,month+offset,day));if(date.getTime()>now.getTime())return date.toISOString().slice(0,10)}return new Date(Date.UTC(year,month+3,day)).toISOString().slice(0,10)}
 
 async function protocolMetrics(){
   const [uni,aave,ethena,chains]=await Promise.allSettled([
@@ -90,33 +111,36 @@ async function protocolMetrics(){
 }
 
 export async function GET(){
-  const [marketsResult,paprikaResult,exchangeResult,chartsResult,aaveStakeResult,enaStakeResult,businessResult]=await Promise.all([
+  const [marketsResult,paprikaResult,exchangeResult,chartsResult,aaveStakeResult,enaStakeResult,uniBurnResult,businessResult]=await Promise.all([
     marketRows().then(value=>({value,error:false as const})).catch(()=>({value:[] as MarketRow[],error:true as const})),
     paprikaRows().then(value=>({value,error:false as const})).catch(()=>({value:[] as MarketRow[],error:true as const})),
     Promise.allSettled(definitions.map(exchangeQuote)),
     Promise.allSettled(definitions.map(chart)),
     totalSupply(STKAAVE).then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
     balanceOf(ENA,SENA).then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
+    uniBurnPeriods().then(value=>({value,error:false as const})).catch(()=>({value:null,error:true as const})),
     protocolMetrics().then(value=>({value,error:false as const})).catch(()=>({value:{uni:null,aave:null,ena:null,xpl:null} as Record<ExpandedTokenId,number|null>,error:true as const})),
   ]);
   const marketMap=new Map(paprikaResult.value.map(row=>[row.id,row]));for(const row of marketsResult.value)marketMap.set(row.id,row);
   const exchangeMap=new Map(exchangeResult.flatMap(result=>result.status==="fulfilled"?[[result.value.id,result.value] as const]:[]));
   const updatedAt=new Date().toISOString();
   const assets:ExpandedAssetSnapshot[]=definitions.map((definition,index)=>{
-    const market=marketMap.get(definition.cgId),exchange=exchangeMap.get(definition.id),total=Number(market?.total_supply)||definition.verified.total,overall=Number(market?.max_supply)||definition.verified.overall,circulating=Number(market?.circulating_supply)||definition.verified.circulating;
+    const market=marketMap.get(definition.cgId),exchange=exchangeMap.get(definition.id),marketTotal=Number(market?.total_supply)||definition.verified.total,total=definition.id==="uni"&&uniBurnResult.value?.current?uniBurnResult.value.current:marketTotal,overall=Number(market?.max_supply)||definition.verified.overall,circulating=Number(market?.circulating_supply)||definition.verified.circulating;
     const chartResult=chartsResult[index],chartRows=chartResult.status==="fulfilled"?chartResult.value.rows:[],chartSource=chartResult.status==="fulfilled"?chartResult.value.source:null,lastPrice=chartRows.at(-1)?.[1]??null,price=exchange?.price||Number(market?.current_price)||lastPrice;
     const stakingAmount=definition.id==="aave"?aaveStakeResult.value:definition.id==="ena"?enaStakeResult.value:null;
     const businessValue=businessResult.value[definition.id];
     const canDeriveBurn=definition.id==="uni"&&overall!=null&&total!=null&&overall>=total;
-    const failedSources=[!exchange&&!market&&"实时行情",chartResult.status!=="fulfilled"&&"交易所日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="xpl"&&"Plasma 验证者聚合",businessValue==null&&"协议规模"].filter(Boolean) as string[];
+    const failedSources=[!exchange&&!market&&"实时行情",chartResult.status!=="fulfilled"&&"交易所日线",definition.id==="aave"&&aaveStakeResult.error&&"stkAAVE 链上供应",definition.id==="ena"&&enaStakeResult.error&&"sENA 锁定量",definition.id==="uni"&&uniBurnResult.error&&"UNI 历史总供应",businessValue==null&&"协议规模"].filter(Boolean) as string[];
+    const unlockEvents=definition.id==="xpl"?[{date:"2026-09-25",amount:1_666_666_667,label:"团队与投资人首个悬崖解锁",beneficiary:"团队与投资人",source:"Plasma 官方代币分配"},{date:"2026-09-25",amount:88_888_889,label:"生态与增长月度释放",beneficiary:"生态与增长",source:"Plasma 官方代币分配"}]:definition.id==="ena"?[{date:nextMonthlyDate(2),amount:171_875_000,label:"团队与投资人已知月度归属",beneficiary:"核心贡献者与投资人",source:"Ethena 官方归属公式；未含 Foundation 与生态"}]:[];
+    const buybackStatus=definition.id==="uni"?"协议费用销毁已运行":definition.id==="aave"?"回购自 2026-04-19 暂停":definition.id==="ena"?"费率开关投票已通过；首个供应门槛未触发":definition.id==="xpl"?"无固定回购；基础费直接销毁":"官方未披露";
     return {
       id:definition.id,name:definition.name,project:definition.project,category:definition.category,color:definition.color,
       price,change24h:exchange?.change24h??(Number.isFinite(Number(market?.price_change_percentage_24h))?Number(market?.price_change_percentage_24h):chartRows.length>1?(chartRows.at(-1)![1]/chartRows.at(-2)![1]-1)*100:null),
       marketCap:price?price*circulating:Number(market?.market_cap)||null,fdv:price?price*overall:Number(market?.fully_diluted_valuation)||null,volume24h:exchange?.volume24h||Number(market?.total_volume)||null,
-      circulatingSupply:circulating,totalSupply:total,overallSupply:overall,burnedSupply:canDeriveBurn?Math.max(0,overall-total):null,burnedMethod:canDeriveBurn?"最大供应与当前总供应差额":"官方未单列",
+      circulatingSupply:circulating,totalSupply:total,overallSupply:overall,burnedSupply:canDeriveBurn?Math.max(0,overall-total):null,burnedMethod:definition.id==="uni"?(uniBurnResult.value?"UNI 合约当前总供应与初始供应差额":"市场总供应备用口径"):definition.id==="xpl"?"基础费永久销毁；累计量官方聚合未开放":"官方未单列",burn30d:definition.id==="uni"?uniBurnResult.value?.burn30d??null:null,burn90d:definition.id==="uni"?uniBurnResult.value?.burn90d??null:null,burnPeriodSource:definition.id==="uni"?"Ethereum UNI totalSupply 历史区块差额":"官方未提供周期聚合",unlockEvents,buybackStatus,
       stakingAmount,stakingApplicable:definition.stakingApplicable,stakingLabel:definition.stakingLabel,stakingExit:definition.stakingExit,
       businessLabel:definition.businessLabel,businessValue,valueCapture:definition.valueCapture,pressure:definition.pressure,risk:definition.risk,
-      chart:chartRows,marketSource:exchange?`${exchange.source} · ${chartSource??"日线暂不可读"}`:market?`${marketsResult.value.some(row=>row.id===definition.cgId)?"CoinGecko":"CoinPaprika 备用"} · ${chartSource??"日线暂不可读"}`:`${chartSource??"行情暂不可读"} 日线推导`,stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"待接 Plasma 官方验证者源",businessSource:"DefiLlama 协议 / 链 TVL",
+      chart:chartRows,marketSource:exchange?`${exchange.source} · ${chartSource??"日线暂不可读"}`:market?`${marketsResult.value.some(row=>row.id===definition.cgId)?"CoinGecko":"CoinPaprika 备用"} · ${chartSource??"日线暂不可读"}`:`${chartSource??"行情暂不可读"} 日线推导`,stakingSource:definition.id==="aave"?"Ethereum stkAAVE totalSupply":definition.id==="ena"?"Ethereum ENA balanceOf(sENA)":definition.id==="uni"?"不适用":"Plasma 官方：外部验证者与委托尚未上线",businessSource:"DefiLlama 协议 / 链 TVL",
       failedSources,updatedAt,
     };
   });
