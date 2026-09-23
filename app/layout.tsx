@@ -12,10 +12,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const preview = `${protocol}://${host}/og-brand-v6.png`;
   return {
-    title: "Token Lens — 八资产统一指标对比看板",
-    description: "横向比较 ETHFI、BP、PENDLE、HYPE、UNI、AAVE、ENA 与 XPL 的市场、供应、质押、协议经营、价值回流和风险。",
-    openGraph: { title: "Token Lens · 八资产对比研究", description: "市场 · 供应 · 质押 · 价值回流 · 风险", images: [{ url: preview }] },
-    twitter: { card: "summary_large_image", title: "Token Lens · 八资产对比研究", description: "市场 · 供应 · 质押 · 价值回流 · 风险", images: [preview] },
+    title: "Token Lens — HYPE、UNI、BP 基本面终端",
+    description: "集中研究 HYPE、UNI 与 BP 的市场、协议业务、供应压力、质押机制和回购销毁。",
+    openGraph: { title: "Token Lens · HYPE / UNI / BP", description: "业务增长 · 供应压力 · 回购销毁", images: [{ url: preview }] },
+    twitter: { card: "summary_large_image", title: "Token Lens · HYPE / UNI / BP", description: "业务增长 · 供应压力 · 回购销毁", images: [preview] },
   };
 }
 

@@ -32,9 +32,10 @@ async function coinGecko(){const headers:Record<string,string>={accept:"applicat
 async function coinPaprika(){return json("https://api.coinpaprika.com/v1/tickers/hype-hyperliquid",{},7000)}
 async function fx(){try{const rate=Number((await json("https://api.coinbase.com/v2/exchange-rates?currency=USD",{},4500)).data?.rates?.CNY);if(rate>0)return{rate,source:"Coinbase FX",stale:false}}catch{}return{rate:7.17,source:"汇率备用值",stale:true}}
 async function assistanceFundBuys(){
-  const now=Date.now(),start90=now-90*86_400_000,rows=await info({type:"userFillsByTime",user:ASSISTANCE_FUND,startTime:start90,endTime:now,aggregateByTime:true}) as Array<{coin?:string;side?:string;sz?:string;time?:number}>;
+  const now=Date.now(),start90=now-90*86_400_000,rows=await info({type:"userFillsByTime",user:ASSISTANCE_FUND,startTime:start90,endTime:now,aggregateByTime:true}) as Array<{coin?:string;side?:string;sz?:string;px?:string;time?:number}>;
   const buys=Array.isArray(rows)?rows.filter(row=>row.side==="B"&&(row.coin==="@107"||row.coin==="HYPE/USDC"||row.coin==="HYPE")):[];
-  return {bought30d:buys.filter(row=>Number(row.time)>=now-30*86_400_000).reduce((sum,row)=>sum+Number(row.sz??0),0),bought90d:buys.reduce((sum,row)=>sum+Number(row.sz??0),0),fills:buys.length};
+  const amount=(days:number)=>buys.filter(row=>Number(row.time)>=now-days*86_400_000).reduce((sum,row)=>sum+Number(row.sz??0),0),notional=(days:number)=>buys.filter(row=>Number(row.time)>=now-days*86_400_000).reduce((sum,row)=>sum+Number(row.sz??0)*Number(row.px??0),0);
+  return {bought1d:amount(1),bought7d:amount(7),bought30d:amount(30),bought90d:amount(90),notional30d:notional(30),notional90d:notional(90),fills:buys.length};
 }
 
 export async function GET(request:NextRequest){
@@ -63,7 +64,7 @@ export async function GET(request:NextRequest){
     chart:rawChart.map(([time,value]:[number,number])=>[time,value*rate]),chartSource,marketSource:venues.map(x=>x.name).join(" · "),venues:venues.map(x=>({...x,price:x.price*rate,volume24h:x.volume24h*rate,high24h:x.high24h*rate,low24h:x.low24h*rate})),
     protocol:perps?{perpsVolume24h:perpsVolume*rate,spotVolume24h:spot?spotVolume*rate:null,openInterest:openInterest*rate,perpMarkets:perpMeta.length,source:"Hyperliquid Info API"}:null,
     staking:validators.length?{totalStaked,stakingRatio:maxSupply?totalStaked/maxSupply:0,activeValidators:activeValidators.length,totalValidators:validators.length,weightedApr,top5Share:totalStaked?top5Stake/totalStaked:0,validators:activeValidators.slice(0,8),delegationLockDays:1,withdrawalDays:7,source:"Hyperliquid validatorSummaries"}:null,
-    assistanceFund:fund?{hype:fundHype,bought30d:fundBuys?.bought30d??null,bought90d:fundBuys?.bought90d??null,buyFills90d:fundBuys?.fills??null,address:ASSISTANCE_FUND,source:fundBuys?"Hyperliquid spotClearinghouseState + userFillsByTime":"Hyperliquid spotClearinghouseState"}:null,
+    assistanceFund:fund?{hype:fundHype,bought1d:fundBuys?.bought1d??null,bought7d:fundBuys?.bought7d??null,bought30d:fundBuys?.bought30d??null,bought90d:fundBuys?.bought90d??null,notional30d:fundBuys?.notional30d??null,notional90d:fundBuys?.notional90d??null,buyFills90d:fundBuys?.fills??null,address:ASSISTANCE_FUND,source:fundBuys?"Hyperliquid spotClearinghouseState + userFillsByTime":"Hyperliquid spotClearinghouseState"}:null,
     currencyRate:rate,supplySource,fxSource:currency==="cny"?fxData.source:"USD",failedSources,stale:(currency==="cny"&&fxData.stale)||failedSources.length>0,updatedAt:new Date().toISOString()
   },{headers:{"Cache-Control":"public, max-age=15, s-maxage=30, stale-while-revalidate=90"}});
 }
