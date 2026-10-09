@@ -12,10 +12,10 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const preview = `${protocol}://${host}/og-brand-v6.png`;
   return {
-    title: "Token Lens — HYPE、UNI、BP 基本面终端",
-    description: "集中研究 HYPE、UNI 与 BP 的市场、协议业务、供应压力、质押机制和回购销毁。",
-    openGraph: { title: "Token Lens · HYPE / UNI / BP", description: "业务增长 · 供应压力 · 回购销毁", images: [{ url: preview }] },
-    twitter: { card: "summary_large_image", title: "Token Lens · HYPE / UNI / BP", description: "业务增长 · 供应压力 · 回购销毁", images: [preview] },
+    title: "Token Lens — 加密市场资金结构与基本面终端",
+    description: "跟踪稳定币、价格趋势、未平仓合约、资金费率、成交结构、ETF 资金流，以及 HYPE、UNI、BP 基本面。",
+    openGraph: { title: "Token Lens · Crypto Capital Structure", description: "稳定币 · 杠杆 · ETF · 代币基本面", images: [{ url: preview }] },
+    twitter: { card: "summary_large_image", title: "Token Lens · Crypto Capital Structure", description: "稳定币 · 杠杆 · ETF · 代币基本面", images: [preview] },
   };
 }
 
